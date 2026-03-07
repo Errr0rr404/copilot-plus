@@ -2,7 +2,7 @@
 
 > Talk to [GitHub Copilot CLI](https://docs.github.com/copilot/concepts/agents/about-copilot-cli) with your voice — and share screenshots — without leaving your terminal.
 
-`ttc` is a drop-in replacement for the `copilot` command. It wraps Copilot CLI transparently and adds two hotkeys:
+`copilot+` is a drop-in replacement for the `copilot` command. It wraps Copilot CLI transparently and adds two hotkeys:
 
 | Hotkey | What it does |
 |--------|-------------|
@@ -52,7 +52,7 @@ curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.
 Verify everything is wired up:
 
 ```bash
-ttc --setup
+copilot+ --setup
 ```
 
 You should see all green checkmarks. If anything is missing, the setup output tells you exactly what to fix.
@@ -99,7 +99,7 @@ That's it. You're now inside Copilot CLI with voice and screenshot support activ
 
 ## Passing Flags to Copilot
 
-Any arguments after `ttc` are forwarded directly to `copilot`:
+Any arguments after `copilot+` are forwarded directly to `copilot`:
 
 ```bash
 ttc --experimental
@@ -155,7 +155,7 @@ Then update `modelPath` in `~/.copilot/talk-to-copilot.json`.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  ttc (PTY wrapper)                                        │
+│  copilot+ (PTY wrapper)                                        │
 │                                                           │
 │  Your keystrokes ──► intercept Ctrl+R / Ctrl+P           │
 │                            │               │              │
@@ -198,7 +198,7 @@ mkdir -p ~/.copilot/models
 curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin" \
   -o ~/.copilot/models/ggml-base.en.bin
 ```
-Then run `ttc --setup` to confirm it's detected.
+Then run `copilot+ --setup` to confirm it's detected.
 
 **Transcription is inaccurate**
 Switch to a larger model:
