@@ -69,6 +69,7 @@ class WakeWordListener extends EventEmitter {
       if (!fs.existsSync(audioFile)) return;
 
       const text = await this._transcribe(audioFile);
+      if (text) this.emit('heard', text);
       if (this._matchesWakePhrase(text)) {
         this.emit('detected');
       }
@@ -123,8 +124,10 @@ class WakeWordListener extends EventEmitter {
     const phrase = ((this.config.wakeWord && this.config.wakeWord.phrase) || 'hey copilot')
       .toLowerCase()
       .trim();
-    // Allow partial matches — "hey copilot" matches "hey copilot can you..."
-    return text.includes(phrase);
+    // Strip punctuation from transcription before comparing so that whisper output
+    // like "Hey, Copilot." or "Hey Copilot!" still matches the wake phrase.
+    const normalized = text.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    return normalized.includes(phrase);
   }
 
   _findTinyModel() {

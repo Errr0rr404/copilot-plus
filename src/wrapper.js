@@ -83,6 +83,13 @@ class CopilotWrapper {
         if (!this._isActiveInstance()) return;
         this._startVoiceAutoStop();
       });
+      this.wakeWord.on('heard', text => {
+        // Briefly flash what whisper heard in the terminal title so you can see
+        // if the wake phrase is being picked up (disappears after 1.5s).
+        const preview = text.length > 40 ? text.slice(0, 37) + '…' : text;
+        this._setTitle(`👂 ${preview}`);
+        setTimeout(() => this._setTitle('copilot'), 1500);
+      });
       this.wakeWord.on('error', err => {
         this._notify('⚠️ Voice activation error', err.message.slice(0, 60));
       });
