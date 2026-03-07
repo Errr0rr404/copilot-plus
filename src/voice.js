@@ -5,6 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+const IS_WIN = os.platform() === 'win32';
+
 class VoiceRecorder {
   constructor(config) {
     this.config = config;
@@ -22,14 +24,11 @@ class VoiceRecorder {
 
     this._audioFile = path.join(os.tmpdir(), `copilot-voice-${Date.now()}.wav`);
 
-    this._proc = spawn('ffmpeg', [
-      '-f', 'avfoundation',
-      '-i', this.config.audioDevice,
-      '-ar', '16000',    // 16kHz — whisper requirement
-      '-ac', '1',        // mono
-      '-y',
-      this._audioFile,
-    ], {
+    const ffmpegArgs = IS_WIN
+      ? ['-f', 'dshow', '-i', `audio=${this.config.audioDevice}`, '-ar', '16000', '-ac', '1', '-y', this._audioFile]
+      : ['-f', 'avfoundation', '-i', this.config.audioDevice, '-ar', '16000', '-ac', '1', '-y', this._audioFile];
+
+    this._proc = spawn('ffmpeg', ffmpegArgs, {
       stdio: ['pipe', 'ignore', 'ignore'],
     });
 
@@ -51,11 +50,17 @@ class VoiceRecorder {
     this._proc = null;
     this._audioFile = null;
 
-    // Ask ffmpeg to stop gracefully; it finalises the WAV header before exit
+    // Ask ffmpeg to stop gracefully — it finalises the WAV header before exit
     await new Promise((resolve, reject) => {
       proc.stdin.write('q');
       proc.stdin.end();
-      const timer = setTimeout(() => { proc.kill('SIGTERM'); }, 3000);
+      const timer = setTimeout(() => {
+        if (IS_WIN) {
+          spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
+        } else {
+          proc.kill('SIGTERM');
+        }
+      }, 3000);
       proc.on('exit', () => { clearTimeout(timer); resolve(); });
       proc.on('error', reject);
     });
@@ -74,7 +79,11 @@ class VoiceRecorder {
   /** Cancel in-progress recording without transcribing. */
   cancel() {
     if (!this._proc) return;
-    this._proc.kill('SIGTERM');
+    if (IS_WIN) {
+      spawn('taskkill', ['/pid', String(this._proc.pid), '/f', '/t']);
+    } else {
+      this._proc.kill('SIGTERM');
+    }
     this._cleanup();
   }
 

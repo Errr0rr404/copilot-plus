@@ -15,25 +15,27 @@ const WHISPER_MODEL_CANDIDATES = [
   path.join(__dirname, '..', 'models', 'ggml-base.en.bin'),
   path.join(__dirname, '..', 'models', 'ggml-small.en.bin'),
   path.join(__dirname, '..', 'models', 'ggml-tiny.en.bin'),
+  // macOS Homebrew paths
   '/opt/homebrew/share/whisper.cpp/models/ggml-base.en.bin',
   '/opt/homebrew/share/whisper.cpp/models/ggml-small.en.bin',
   '/opt/homebrew/share/whisper.cpp/models/ggml-tiny.en.bin',
   '/usr/local/share/whisper.cpp/models/ggml-base.en.bin',
+  // Windows common paths
+  path.join(os.homedir(), 'AppData', 'Local', 'whisper.cpp', 'models', 'ggml-base.en.bin'),
+  path.join(os.homedir(), 'AppData', 'Local', 'whisper.cpp', 'models', 'ggml-small.en.bin'),
+  'C:\\whisper.cpp\\models\\ggml-base.en.bin',
+  'C:\\whisper.cpp\\models\\ggml-small.en.bin',
 ];
 
 /** Score an audio device name — higher = more likely to be the real microphone. */
 function scoreMicDevice(name) {
   const n = name.toLowerCase();
-
-  // Hard skip — virtual/loopback/software devices almost never contain the user's voice
-  if (/teams|zoom|loopback|soundflower|blackhole|virtual|aggregate|multi.output/.test(n)) return -1;
-
+  if (/teams|zoom|loopback|soundflower|blackhole|virtual|aggregate|multi.output|stereo mix|wave out/.test(n)) return -1;
   if (n.includes('built-in')) return 100;
   if (n.includes('macbook') && n.includes('microphone')) return 90;
-  if (n.includes('microphone')) return 80;   // any real-sounding mic
-  if (n.includes('iphone') || n.includes('ipad')) return 50;  // continuity mic — fine but secondary
-
-  return 10; // unknown device — prefer over virtual but below named mics
+  if (n.includes('microphone')) return 80;
+  if (n.includes('iphone') || n.includes('ipad')) return 50;
+  return 10;
 }
 
 /**
@@ -42,19 +44,44 @@ function scoreMicDevice(name) {
  * Returns null if detection fails.
  */
 function detectMicrophone() {
+  if (os.platform() === 'win32') return detectMicrophoneWindows();
+
   try {
     const output = execFileSync('ffmpeg', [
       '-f', 'avfoundation', '-list_devices', 'true', '-i', '',
     ], { encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] });
-
-    return parseBestMic(output);
+    return parseBestMicMac(output);
   } catch (err) {
-    // ffmpeg exits non-zero when listing devices — stderr is in err.stderr
-    return parseBestMic(err.stderr || '');
+    return parseBestMicMac(err.stderr || '');
   }
 }
 
-function parseBestMic(output) {
+function detectMicrophoneWindows() {
+  try {
+    const output = execFileSync('ffmpeg', [
+      '-f', 'dshow', '-list_devices', 'true', '-i', 'dummy',
+    ], { encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] });
+    return parseBestMicWindows(output);
+  } catch (err) {
+    return parseBestMicWindows(err.stderr || '');
+  }
+}
+
+function parseBestMicWindows(output) {
+  // Match lines like: [dshow @ 0x...] "Microphone (Realtek Audio)" (audio)
+  const deviceRe = /\[dshow.*?\]\s+"([^"]+)"\s+\(audio\)/g;
+  let best = null;
+  let bestScore = -Infinity;
+  let m;
+  while ((m = deviceRe.exec(output)) !== null) {
+    const name = m[1].trim();
+    const score = scoreMicDevice(name);
+    if (score > bestScore) { bestScore = score; best = name; }
+  }
+  return best; // Windows uses the device name directly: audio="Microphone (Realtek Audio)"
+}
+
+function parseBestMicMac(output) {
   // Match lines like: [AVFoundation indev @ 0x...] [2] MacBook Pro Microphone
   const deviceRe = /\[AVFoundation.*?\]\s+\[(\d+)\]\s+(.+)/g;
 
@@ -68,17 +95,13 @@ function parseBestMic(output) {
     if (!inAudioSection) continue;
 
     const m = deviceRe.exec(line);
-    deviceRe.lastIndex = 0; // reset for next iteration
+    deviceRe.lastIndex = 0;
     if (!m) continue;
 
     const [, index, name] = m;
     const score = scoreMicDevice(name.trim());
-    if (score > bestScore) {
-      bestScore = score;
-      best = `:${index}`;
-    }
+    if (score > bestScore) { bestScore = score; best = `:${index}`; }
   }
-
   return best;
 }
 
