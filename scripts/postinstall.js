@@ -10,13 +10,18 @@ const os = require('os');
 
 if (os.platform() !== 'darwin' && os.platform() !== 'linux') process.exit(0);
 
-const prebuildDir = path.join(__dirname, '..', 'node_modules', 'node-pty', 'prebuilds');
-if (!fs.existsSync(prebuildDir)) process.exit(0);
+// Use require.resolve to find node-pty regardless of hoisting / install location
+let nodePtyDir;
+try {
+  nodePtyDir = path.dirname(require.resolve('node-pty/package.json'));
+} catch {
+  process.exit(0); // node-pty not found, nothing to fix
+}
 
 const platform = `${os.platform()}-${os.arch()}`;
 const targets = [
-  path.join(prebuildDir, platform, 'spawn-helper'),
-  path.join(prebuildDir, platform, 'pty.node'),
+  path.join(nodePtyDir, 'prebuilds', platform, 'spawn-helper'),
+  path.join(nodePtyDir, 'prebuilds', platform, 'pty.node'),
 ];
 
 let fixed = 0;
