@@ -62,7 +62,7 @@ You should see all green checkmarks. If anything is missing, the setup output te
 ## Quick Start
 
 ```bash
-ttc
+copilot+
 ```
 
 That's it. You're now inside Copilot CLI with voice and screenshot support active.
@@ -102,9 +102,9 @@ That's it. You're now inside Copilot CLI with voice and screenshot support activ
 Any arguments after `copilot+` are forwarded directly to `copilot`:
 
 ```bash
-ttc --experimental
-ttc --banner
-ttc --help
+copilot+ --experimental
+copilot+ --banner
+copilot+ --help
 ```
 
 ---

@@ -34,9 +34,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: Errr0rr404/homebrew-ttc
+          repository: Errr0rr404/homebrew-copilot-plus
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: homebrew-ttc
+          path: homebrew-copilot-plus
 
       - name: Compute npm tarball sha256
         id: sha
@@ -52,14 +52,14 @@ jobs:
 
       - name: Patch formula
         run: |
-          cd homebrew-ttc
-          sed -i "s|url \".*\"|url \"${{ steps.sha.outputs.url }}\"|" Formula/ttc.rb
-          sed -i "s|sha256 \".*\"|sha256 \"${{ steps.sha.outputs.sha }}\"|" Formula/ttc.rb
+          cd homebrew-copilot-plus
+          sed -i "s|url \".*\"|url \"${{ steps.sha.outputs.url }}\"|" Formula/copilot-plus.rb
+          sed -i "s|sha256 \".*\"|sha256 \"${{ steps.sha.outputs.sha }}\"|" Formula/copilot-plus.rb
 
       - name: Commit updated formula
         run: |
-          cd homebrew-ttc
+          cd homebrew-copilot-plus
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -am "Update ttc to v${{ steps.sha.outputs.version }}"
+          git commit -am "Update copilot-plus to v${{ steps.sha.outputs.version }}"
           git push

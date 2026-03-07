@@ -6,7 +6,7 @@
     "copilot+": "bin/copilot+"
   },
   "scripts": {
-    "setup": "node bin/ttc --setup",
+    "setup": "node \"bin/copilot+\" --setup",
     "postinstall": "node scripts/postinstall.js"
   },
   "files": [

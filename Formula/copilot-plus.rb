@@ -1,12 +1,12 @@
-# Place this file in a GitHub repo named: Errr0rr404/homebrew-ttc
+# Place this file in a GitHub repo named: Errr0rr404/homebrew-copilot-plus
 # Users install with:
-#   brew tap Errr0rr404/ttc
-#   brew install ttc
+#   brew tap Errr0rr404/copilot-plus
+#   brew install copilot-plus
 
-class Ttc < Formula
+class CopilotPlus < Formula
   desc "Voice + screenshot input wrapper for GitHub Copilot CLI"
   homepage "https://github.com/Errr0rr404/talk-to-copilot"
-  url "https://registry.npmjs.org/talk-to-copilot/-/talk-to-copilot-1.0.0.tgz"
+  url "https://registry.npmjs.org/talk-to-copilot/-/talk-to-copilot-1.0.6.tgz"
   # Run `npm view talk-to-copilot dist.shasum` after publishing and paste the sha256 here
   sha256 "FILL_IN_AFTER_NPM_PUBLISH"
   license "MIT"
@@ -27,7 +27,7 @@ class Ttc < Formula
     libexec.install Dir["*"]
 
     # Write a launcher that ensures the Homebrew node is on PATH
-    (bin/"ttc").write_env_script libexec/"bin/ttc",
+    (bin/"copilot+").write_env_script libexec/"bin/copilot+",
       PATH: "#{Formula["node"].opt_bin}:$PATH"
   end
 
@@ -36,17 +36,22 @@ class Ttc < Formula
       Download a Whisper speech model (required for voice input):
         whisper-cpp-download-ggml-model base.en
 
-      Then verify your setup:
-        ttc --setup
+      Or download directly:
+        mkdir -p ~/.copilot/models
+        curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin \\
+          -o ~/.copilot/models/ggml-base.en.bin
 
-      Hotkeys inside ttc:
+      Then verify your setup:
+        copilot+ --setup
+
+      Hotkeys inside copilot+:
         Ctrl+R  →  Start / stop voice recording
         Ctrl+P  →  Take a screenshot (attached as @path)
     EOS
   end
 
   test do
-    output = shell_output("#{bin}/ttc --setup 2>&1")
+    output = shell_output("#{bin}/copilot+ --setup 2>&1")
     assert_match "talk-to-copilot setup", output
   end
 end

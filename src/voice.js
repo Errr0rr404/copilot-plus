@@ -92,7 +92,7 @@ class VoiceRecorder {
 
     if (!modelPath) {
       return Promise.reject(new Error(
-        'No whisper model found. Run: talk --setup'
+        'No whisper model found. Run: copilot+ --setup'
       ));
     }
 
