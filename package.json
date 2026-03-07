@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Voice + screenshot input wrapper for GitHub Copilot CLI — use your mic and screen instead of typing",
   "bin": {
-    "ttc": "./bin/ttc"
+    "ttc": "bin/ttc"
   },
   "scripts": {
     "setup": "node bin/ttc --setup",
@@ -28,7 +28,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Errr0rr404/talk-to-copilot.git"
+    "url": "git+https://github.com/Errr0rr404/talk-to-copilot.git"
   },
   "homepage": "https://github.com/Errr0rr404/talk-to-copilot#readme",
   "bugs": {
