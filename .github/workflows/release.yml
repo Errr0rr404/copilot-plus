@@ -42,7 +42,7 @@ jobs:
         id: sha
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          URL="https://registry.npmjs.org/talk-to-copilot/-/talk-to-copilot-${VERSION}.tgz"
+          URL="https://registry.npmjs.org/copilot-plus/-/copilot-plus-${VERSION}.tgz"
           # Wait briefly for npm CDN to propagate
           sleep 15
           SHA=$(curl -sL "$URL" | sha256sum | awk '{print $1}')

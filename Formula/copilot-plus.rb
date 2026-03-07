@@ -5,9 +5,9 @@
 
 class CopilotPlus < Formula
   desc "Voice + screenshot input wrapper for GitHub Copilot CLI"
-  homepage "https://github.com/Errr0rr404/talk-to-copilot"
-  url "https://registry.npmjs.org/talk-to-copilot/-/talk-to-copilot-1.0.6.tgz"
-  # Run `npm view talk-to-copilot dist.shasum` after publishing and paste the sha256 here
+  homepage "https://github.com/Errr0rr404/copilot-plus"
+  url "https://registry.npmjs.org/copilot-plus/-/copilot-plus-1.0.8.tgz"
+  # Run `npm view copilot-plus dist.shasum` after publishing and paste the sha256 here
   sha256 "FILL_IN_AFTER_NPM_PUBLISH"
   license "MIT"
 
@@ -52,6 +52,6 @@ class CopilotPlus < Formula
 
   test do
     output = shell_output("#{bin}/copilot+ --setup 2>&1")
-    assert_match "talk-to-copilot setup", output
+    assert_match "copilot-plus setup", output
   end
 end

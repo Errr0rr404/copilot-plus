@@ -1,5 +1,5 @@
 {
-  "name": "talk-to-copilot",
+  "name": "copilot-plus",
   "version": "1.0.8",
   "description": "Voice + screenshot input wrapper for GitHub Copilot CLI — use your mic and screen instead of typing",
   "bin": {
@@ -28,11 +28,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Errr0rr404/talk-to-copilot.git"
+    "url": "git+https://github.com/Errr0rr404/copilot-plus.git"
   },
-  "homepage": "https://github.com/Errr0rr404/talk-to-copilot#readme",
+  "homepage": "https://github.com/Errr0rr404/copilot-plus#readme",
   "bugs": {
-    "url": "https://github.com/Errr0rr404/talk-to-copilot/issues"
+    "url": "https://github.com/Errr0rr404/copilot-plus/issues"
   },
   "dependencies": {
     "node-pty": "^1.0.0"

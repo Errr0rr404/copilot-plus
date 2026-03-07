@@ -5,7 +5,7 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
-const CONFIG_PATH = path.join(os.homedir(), '.copilot', 'talk-to-copilot.json');
+const CONFIG_PATH = path.join(os.homedir(), '.copilot', 'copilot-plus.json');
 
 const WHISPER_MODEL_CANDIDATES = [
   path.join(os.homedir(), '.copilot', 'whisper-model.bin'),

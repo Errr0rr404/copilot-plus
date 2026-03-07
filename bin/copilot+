@@ -23,7 +23,7 @@ wrapper.start();
 function runSetup() {
   const config = cfg.load();
 
-  console.log('\n🛠  talk-to-copilot setup\n');
+  console.log('\n🛠  copilot-plus setup\n');
   console.log('Checking dependencies…\n');
 
   let allGood = true;
@@ -79,18 +79,18 @@ function runSetup() {
     console.log(`  modelPath:   ${config.modelPath || '(not set)'}`);
     console.log(`  audioDevice: ${config.audioDevice}   (auto-detected — override in config if wrong)`);
     console.log(`  autoSubmit:  ${config.autoSubmit}   (auto-press Enter after transcription)`);
-    console.log('\nHotkeys (inside talk):');
+    console.log('\nHotkeys (inside copilot+):');
     console.log('  Ctrl+R  →  Start / stop voice recording');
     console.log('  Ctrl+P  →  Take a screenshot (injected as @path)');
     console.log('\nUsage:');
-    console.log('  talk              →  launch copilot with voice + screenshot support');
-    console.log('  talk --setup      →  show this screen');
-    console.log('  talk --help       →  pass --help through to copilot\n');
+    console.log('  copilot+              →  launch copilot with voice + screenshot support');
+    console.log('  copilot+ --setup      →  show this screen');
+    console.log('  copilot+ --help       →  pass --help through to copilot\n');
 
     if (allGood) {
-      console.log('✅  All dependencies found. Run `talk` to start!\n');
+      console.log('✅  All dependencies found. Run `copilot+` to start!\n');
     } else {
-      console.log('⚠️   Fix the issues above, then re-run `talk --setup`.\n');
+      console.log('⚠️   Fix the issues above, then re-run `copilot+ --setup`.\n');
     }
     process.exit(0);
   }, 400);

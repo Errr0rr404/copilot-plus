@@ -1,4 +1,4 @@
-# talk-to-copilot
+# copilot-plus
 
 > Talk to [GitHub Copilot CLI](https://docs.github.com/copilot/concepts/agents/about-copilot-cli) with your voice — and share screenshots — without leaving your terminal.
 
@@ -28,7 +28,7 @@ Everything else — all Copilot features, slash commands, modes — works exactl
 ## Installation
 
 ```bash
-npm install -g talk-to-copilot
+npm install -g copilot-plus
 ```
 
 Then install the speech dependencies if you haven't already:
@@ -111,7 +111,7 @@ copilot+ --help
 
 ## Configuration
 
-Settings are stored at `~/.copilot/talk-to-copilot.json` and created automatically on first run.
+Settings are stored at `~/.copilot/copilot-plus.json` and created automatically on first run.
 
 ```json
 {
@@ -147,7 +147,7 @@ Look for your microphone in the output. The number in brackets (e.g. `[2]`) is t
 whisper-cpp-download-ggml-model small.en
 ```
 
-Then update `modelPath` in `~/.copilot/talk-to-copilot.json`.
+Then update `modelPath` in `~/.copilot/copilot-plus.json`.
 
 ---
 
@@ -179,7 +179,7 @@ Transcription is 100% local — whisper.cpp runs on your machine, nothing is sen
 ## Troubleshooting
 
 **`posix_spawnp failed` on first run**
-Run `npm install -g talk-to-copilot` again — the postinstall script will fix the permissions automatically.
+Run `npm install -g copilot-plus` again — the postinstall script will fix the permissions automatically.
 
 **Microphone not being captured / transcription is always the same word**
 Your `audioDevice` is pointing to the wrong input (e.g. a virtual audio device).
@@ -205,7 +205,7 @@ Switch to a larger model:
 ```bash
 whisper-cpp-download-ggml-model small.en
 ```
-Then update `modelPath` in `~/.copilot/talk-to-copilot.json`.
+Then update `modelPath` in `~/.copilot/copilot-plus.json`.
 
 **Screenshot doesn't attach**
 Make sure Screen Recording permission is granted:

@@ -33,5 +33,5 @@ for (const t of targets) {
 }
 
 if (fixed > 0) {
-  console.log(`[talk-to-copilot] Fixed node-pty permissions for ${platform} (${fixed} files)`);
+  console.log(`[copilot-plus] Fixed node-pty permissions for ${platform} (${fixed} files)`);
 }
