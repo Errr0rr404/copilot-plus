@@ -4,8 +4,8 @@
 class CopilotPlus < Formula
   desc "Voice + screenshot input wrapper for GitHub Copilot CLI"
   homepage "https://github.com/Errr0rr404/copilot-plus"
-  url "https://github.com/Errr0rr404/copilot-plus/archive/refs/tags/v1.0.21.tar.gz"
-  sha256 "df0772bef8c56a7ab4f8d3eb1bf84460df5a60fa25925fc79f5d327311a57a01"
+  url "https://github.com/Errr0rr404/copilot-plus/archive/refs/tags/v1.0.22.tar.gz"
+  sha256 "888bb83f37ec18b301af5426b63ebf7314a269fde84d0adb31b20b9324bb00de"
   license "MIT"
 
   depends_on "node"
