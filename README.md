@@ -1,10 +1,10 @@
 # copilot-plus
 
-> Talk to [GitHub Copilot CLI](https://docs.github.com/copilot/concepts/agents/about-copilot-cli) with your voice — share screenshots — and switch AI models instantly — without leaving your terminal.
+> Talk to [GitHub Copilot CLI](https://docs.github.com/copilot/concepts/agents/about-copilot-cli) with your voice — share screenshots — switch AI models instantly — and monitor all running sessions from one dashboard.
 
 `copilot+` is a drop-in replacement for the `copilot` command. It wraps Copilot CLI transparently and adds powerful input enhancements:
 
-| Hotkey | What it does |
+| Hotkey / Command | What it does |
 |--------|-------------|
 | **Ctrl+R** | Start / stop voice recording → transcription is typed into your prompt |
 | **Ctrl+P** | Screenshot picker → file path is injected as `@/path/screenshot.png` |
@@ -13,6 +13,7 @@
 | **Ctrl+Shift+1–4** *(kitty/WezTerm/Windows Terminal)* | Switch to workhorse model slot 1–4 on CSI u–capable terminals |
 | **Option+1–9** *(macOS Terminal.app)* | Execute a prompt macro — requires "Use Option as Meta Key" |
 | **Ctrl+1–9** *(kitty/WezTerm/Windows Terminal)* | Execute a prompt macro on CSI u–capable terminals |
+| `copilot+ --monitor` | Open the real-time agent dashboard |
 
 Everything else — all Copilot features, slash commands, modes — works exactly as normal.
 
@@ -164,7 +165,46 @@ Press **Ctrl+K** to open the command palette — a searchable overlay listing ev
 
 ---
 
-## Workhorse Model Slots
+## Agent Monitor
+
+Run `copilot+ --monitor` in any terminal to open a live dashboard showing every running copilot session on your machine:
+
+```bash
+copilot+ --monitor
+```
+
+```
+╭──────────────────────────── copilot+ monitor ─────────────────────────────╮
+│  3 active  ·  1 need attention      updates every 1.5s  ·  4:36 PM  ·  q  │
+│  individual pro  ·  587/1500 premium req  █████░░░░░░░  resets 2026-04-01  │
+├────────────────────────────────────────────────────────────────────────────┤
+│  ⚠  ATTENTION    pid 46206  claude-sonnet-4.6    ~/projects/api            │
+│                8 premium req     started 14m ago  ·  8 msgs  ·  active 1m  │
+├────────────────────────────────────────────────────────────────────────────┤
+│  ●  IDLE         pid 51111  gpt-4.1               ~/projects/frontend       │
+│                3 premium req     started 8m ago  ·  3 msgs  ·  active now  │
+├ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┤
+│  ●  IDLE         pid 28741  [copilot CLI]         ~/projects/docs           │
+│                [unmanaged – no stats]    started 1h ago                     │
+╰────────────────────────────────────────────────────────────────────────────╯
+```
+
+**What you see:**
+
+| Item | Description |
+|------|-------------|
+| **Header quota bar** | Your plan, premium requests used/remaining this month, and reset date — pulled live from the GitHub Copilot API |
+| **Status badge** | `ATTENTION` (response waiting >30 s), `THINKING` (waiting for response), `IDLE`, `RECORDING`, `TRANSCRIBING`, `DONE` |
+| **Premium req count** | Number of AI exchanges in this session (copilot+ managed sessions only) |
+| **`[copilot CLI]`** | A bare `copilot` session not started through `copilot+` — no per-session stats available |
+
+**Controls:** `q` / `Q` / `Ctrl+C` / `Esc` to exit.
+
+Sessions disappear automatically when the `copilot` process exits. Stale entries older than 5 minutes are pruned.
+
+---
+
+
 
 Assign up to 4 AI models to slots so you can switch between them instantly with a single hotkey — no more typing `/model` each time.
 
@@ -412,9 +452,6 @@ Open Terminal → Settings → Profiles → Keyboard → check **"Use Option as 
 
 **Model slot hotkey does nothing (kitty/WezTerm/Windows Terminal)**  
 Ensure your terminal is configured to send CSI u key sequences. In kitty this is on by default. In WezTerm, `enable_kitty_keyboard = true` must be set. In Windows Terminal, enable **"Input: Terminal Input Encoding"** → `application/vnd.ms-terminal.keyboard.v2` in settings.
-
-**Option+1–9 macros don't work (macOS Apple Terminal)**  
-Open Terminal → Settings → Profiles → Keyboard → check **"Use Option as Meta Key"**.
 
 **Screenshot doesn't attach (macOS)**  
 *System Settings → Privacy & Security → Screen Recording → enable your terminal app*

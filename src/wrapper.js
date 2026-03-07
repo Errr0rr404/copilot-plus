@@ -12,6 +12,7 @@ const screenshot = require('./screenshot');
 const MacroManager = require('./macros');
 const CommandPalette = require('./palette');
 const WakeWordListener = require('./wakeword');
+const agentState = require('./agent-state');
 
 // Shared file used to coordinate wake word activation across multiple copilot+ instances.
 // Whichever instance the user most recently typed in is considered "active" and will
@@ -33,6 +34,29 @@ const MODEL_SLOT_CSI_U_RE = /^\x1b\[(\d+);6u$/;
 const MODEL_SLOT_META_RE = /^\x1b([!@#$])$/;
 const META_SHIFTED_MAP = { '!': 1, '@': 2, '#': 3, '$': 4 };
 
+// Token/model patterns to scan from stripped PTY output (best-effort)
+const TOKEN_PATTERNS = [
+  // Arrow-style:  ↑ 1,234  ↓ 567
+  { in: /↑\s*([\d,]+)/, out: /↓\s*([\d,]+)/ },
+  // "input: N / output: N" or "in: N out: N"
+  { in: /\bin(?:put)?[:\s]+([\d,]+)/i, out: /\bout(?:put)?[:\s]+([\d,]+)/i },
+  // "tokens: N" (total — split 60/40 as rough estimate if no separate in/out)
+  { total: /tokens?[:\s]+([\d,]+)/i },
+];
+const MODEL_PATTERNS = [
+  /(?:model|using)[:\s]+([a-z][a-z0-9._-]{3,40})/i,
+  /switched.*?([a-z][a-z0-9._-]{3,40})/i,
+];
+
+function stripAnsi(s) {
+  return s.replace(/\x1b\[[0-9;]*[mA-Za-z]/g, '').replace(/\x1b[()][AB012]/g, '');
+}
+
+function parseNum(s) {
+  if (!s) return 0;
+  return parseInt(s.replace(/,/g, ''), 10) || 0;
+}
+
 function resolveBin(name) {
   try {
     const cmd = IS_WIN ? 'where' : 'which';
@@ -51,6 +75,11 @@ class CopilotWrapper {
     this.palette = new CommandPalette();
     this.wakeWord = new WakeWordListener(cfg);
     this._busy = false;
+    this._pid = process.pid;
+    this._tokensIn = 0;
+    this._tokensOut = 0;
+    this._exchanges = 0;
+    this._outputBuf = ''; // rolling plain-text buffer for token/model parsing
   }
 
   start() {
@@ -64,10 +93,25 @@ class CopilotWrapper {
 
     this._shell = shell;
 
+    // Write initial state for the monitor
+    agentState.writeState(this._pid, {
+      cwd: process.cwd(),
+      startedAt: new Date().toISOString(),
+      status: 'idle',
+      model: this._resolveCurrentModel(),
+      tokensIn: 0,
+      tokensOut: 0,
+      exchanges: 0,
+    });
+
     shell.onData(data => {
       if (!this.palette.isOpen) process.stdout.write(data);
+      this._handlePtyOutput(data);
     });
-    shell.onExit(({ exitCode }) => process.exit(exitCode));
+    shell.onExit(({ exitCode }) => {
+      agentState.clearState(this._pid);
+      process.exit(exitCode);
+    });
 
     process.stdout.on('resize', () => {
       try { shell.resize(process.stdout.columns, process.stdout.rows); } catch {}
@@ -109,8 +153,80 @@ class CopilotWrapper {
     process.on('exit', () => {
       if (this.voice.isRecording) this.voice.cancel();
       if (this.wakeWord.isListening) this.wakeWord.stop();
+      agentState.clearState(this._pid);
     });
     process.on('SIGTERM', () => process.exit(0));
+  }
+
+  /** Returns the best-known current model name (from config or runtime tracking). */
+  _resolveCurrentModel() {
+    if (this._currentModel) return this._currentModel;
+    const wm = this.cfg.workhorseModels || {};
+    return wm[1] || '';
+  }
+
+  /** Called on every PTY data chunk — parses for tokens and model name. */
+  _handlePtyOutput(data) {
+    const plain = stripAnsi(typeof data === 'string' ? data : data.toString());
+
+    // Rolling buffer — keep last 2 KB of plain text
+    this._outputBuf = (this._outputBuf + plain).slice(-2048);
+
+    let didFindTokens = false;
+
+    for (const pat of TOKEN_PATTERNS) {
+      if (pat.in && pat.out) {
+        const mIn  = pat.in.exec(this._outputBuf);
+        const mOut = pat.out.exec(this._outputBuf);
+        if (mIn && mOut) {
+          const newIn  = parseNum(mIn[1]);
+          const newOut = parseNum(mOut[1]);
+          if (newIn > this._tokensIn || newOut > this._tokensOut) {
+            this._tokensIn  = Math.max(this._tokensIn,  newIn);
+            this._tokensOut = Math.max(this._tokensOut, newOut);
+            didFindTokens = true;
+          }
+          break;
+        }
+      } else if (pat.total) {
+        const m = pat.total.exec(this._outputBuf);
+        if (m) {
+          const total = parseNum(m[1]);
+          if (total > this._tokensIn + this._tokensOut) {
+            // rough split
+            this._tokensIn  = Math.round(total * 0.65);
+            this._tokensOut = total - this._tokensIn;
+            didFindTokens = true;
+          }
+          break;
+        }
+      }
+    }
+
+    // Try to detect current model name from output
+    for (const re of MODEL_PATTERNS) {
+      const m = re.exec(this._outputBuf);
+      if (m && m[1] && m[1].length > 3) {
+        this._currentModel = m[1];
+        break;
+      }
+    }
+
+    agentState.writeState(this._pid, {
+      status: this._deriveStatus(),
+      model: this._resolveCurrentModel(),
+      tokensIn: this._tokensIn,
+      tokensOut: this._tokensOut,
+      exchanges: this._exchanges,
+      lastOutputAt: new Date().toISOString(),
+    });
+  }
+
+  /** Derive the current status string from live state (not attention — monitor computes that). */
+  _deriveStatus() {
+    if (this.voice.isRecording) return 'recording';
+    if (this._busy) return 'transcribing';
+    return 'idle';
   }
 
   _handleInput(data) {
@@ -175,7 +291,17 @@ class CopilotWrapper {
     if (key === CTRL_C && this.voice.isRecording) {
       this.voice.cancel();
       this._setTitle('copilot');
-      this._notify('�� Recording cancelled', '');
+      this._notify('🚫 Recording cancelled', '');
+    }
+
+    // Track when user submits a prompt (Enter key) for the monitor's attention heuristic
+    if (key === '\r' || key === '\n') {
+      this._exchanges++;
+      agentState.writeState(this._pid, {
+        lastInputAt: new Date().toISOString(),
+        exchanges: this._exchanges,
+        status: 'idle',
+      });
     }
 
     this._shell.write(key);
@@ -312,6 +438,8 @@ class CopilotWrapper {
       this._notify(`🤖 Workhorse ${slot} not set`, 'Press Ctrl+K to configure model slots');
       return;
     }
+    this._currentModel = model;
+    agentState.writeState(this._pid, { model });
     // Ctrl+U clears the current input line before injecting the /model command
     this._shell.write(`\x15/model ${model}\r`);
     this._notify(`🤖 Switched to Workhorse ${slot}`, model);
@@ -322,6 +450,7 @@ class CopilotWrapper {
     if (this.wakeWord.isListening) this.wakeWord.stop();
     try {
       this.voice.start();
+      agentState.writeState(this._pid, { status: 'recording' });
       this._setTitle('🎙 Recording… (Ctrl+R to stop, Ctrl+C to cancel)');
       this._notify('🎙 Recording started', 'Press Ctrl+R to stop');
     } catch (err) {
@@ -374,12 +503,14 @@ class CopilotWrapper {
   _stopVoice() {
     if (this._busy) return;
     this._busy = true;
+    agentState.writeState(this._pid, { status: 'transcribing' });
     this._setTitle('⏳ Transcribing…');
     this._notify('⏳ Transcribing…', 'Please wait');
 
     this.voice.stopAndTranscribe()
       .then(text => {
         this._setTitle('copilot');
+        agentState.writeState(this._pid, { status: 'idle' });
         if (text) {
           this._shell.write(text + (this.cfg.autoSubmit ? '\r' : ''));
           this._notify('✅ Done', text.length > 80 ? text.slice(0, 77) + '…' : text);
@@ -389,6 +520,7 @@ class CopilotWrapper {
       })
       .catch(err => {
         this._setTitle('copilot');
+        agentState.writeState(this._pid, { status: 'idle' });
         this._notify('❌ Transcription failed', err.message.slice(0, 80));
       })
       .finally(() => {
