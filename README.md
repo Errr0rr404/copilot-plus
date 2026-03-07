@@ -2,12 +2,14 @@
 
 > Talk to [GitHub Copilot CLI](https://docs.github.com/copilot/concepts/agents/about-copilot-cli) with your voice — and share screenshots — without leaving your terminal.
 
-`copilot+` is a drop-in replacement for the `copilot` command. It wraps Copilot CLI transparently and adds two hotkeys:
+`copilot+` is a drop-in replacement for the `copilot` command. It wraps Copilot CLI transparently and adds powerful input enhancements:
 
 | Hotkey | What it does |
 |--------|-------------|
 | **Ctrl+R** | Start / stop voice recording → transcription is typed into your prompt |
 | **Ctrl+P** | Screenshot picker → file path is injected as `@/path/screenshot.png` |
+| **Ctrl+/** | Open command palette — access all features from a searchable menu |
+| **Ctrl+1–9** | Execute a prompt macro (requires CSI u–capable terminal) |
 
 Everything else — all Copilot features, slash commands, modes — works exactly as normal.
 
@@ -124,6 +126,118 @@ Add context if you want (e.g. _"what's wrong with this?"_), then press **Enter**
 
 ---
 
+## First-Run Setup
+
+On your first launch of `copilot+`, an interactive onboarding wizard will ask about:
+
+- **Dictation mode** — continuous voice-to-text
+- **Wake word activation** — hands-free "hey copilot" (or "computer") keyword detection
+- **Prompt macros** — assign saved prompts to Ctrl+1 through Ctrl+9
+
+Your choices are saved to `~/.copilot/copilot-plus.json`. Re-run the wizard anytime:
+
+```bash
+copilot+ --preferences
+```
+
+---
+
+## Command Palette
+
+Press **Ctrl+/** to open the command palette — a searchable overlay listing every copilot-plus action:
+
+- 🎙 Voice Recording
+- 📸 Screenshot
+- 📝 Dictation Mode (toggle)
+- 🗣️ Wake Word (toggle)
+- ⌨️ Macros 1–9 (execute)
+- ⚙️ Open Preferences
+
+Type to filter, arrow keys to navigate, Enter to select, Esc to dismiss.
+
+---
+
+## Prompt Macros
+
+Assign frequently used prompts to **Ctrl+1** through **Ctrl+9**. When pressed, the saved text is instantly injected into your Copilot prompt.
+
+Configure macros during onboarding, via `copilot+ --preferences`, or by editing `~/.copilot/copilot-plus.json`:
+
+```json
+{
+  "macros": {
+    "1": "Write unit tests for this code",
+    "2": "Explain this code step by step",
+    "3": "Refactor this to use async/await"
+  }
+}
+```
+
+> **Note:** Ctrl+1–9 require a terminal that supports **CSI u** key encoding (iTerm2, kitty, WezTerm, Windows Terminal). In other terminals, access macros through the command palette (Ctrl+/).
+
+---
+
+## Dictation Mode
+
+Dictation mode provides **continuous voice-to-text** — speak naturally and your words are transcribed and injected in real-time.
+
+- Toggle via the **command palette** (Ctrl+/ → Dictation Mode) or press **Ctrl+R** while dictating to stop
+- Records in short chunks (default: 4 seconds), transcribes each, and injects the text
+- Uses the same local whisper-cli pipeline — no audio leaves your machine
+
+Configure chunk duration in `~/.copilot/copilot-plus.json`:
+
+```json
+{
+  "dictation": {
+    "enabled": false,
+    "chunkSeconds": 4
+  }
+}
+```
+
+---
+
+## Wake Word Activation
+
+Say **"computer"** (default) or **"hey copilot"** (custom) to start voice recording hands-free.
+
+Uses [Picovoice Porcupine](https://picovoice.ai/platform/porcupine/) for ultra-low-CPU always-on keyword detection.
+
+### Setup
+
+1. **Get a free Picovoice AccessKey** at [console.picovoice.ai](https://console.picovoice.ai/)
+
+2. **Install the Porcupine packages** (optional — only needed if you enable wake word):
+   ```bash
+   npm install -g @picovoice/porcupine-node @picovoice/pvrecorder-node
+   ```
+
+3. **Enable during onboarding** or via `copilot+ --preferences`. You'll be prompted for your AccessKey.
+
+### Custom "Hey Copilot" Keyword
+
+The default built-in keyword is **"computer"**. To use **"hey copilot"**:
+
+1. Go to [Picovoice Console](https://console.picovoice.ai/) → Train a keyword → "hey copilot"
+2. Download the `.ppn` file for your platform (macOS/Windows/Linux)
+3. Set the path in config:
+
+```json
+{
+  "wakeWord": {
+    "enabled": true,
+    "accessKey": "YOUR_ACCESS_KEY_HERE",
+    "keywordPath": "/path/to/hey-copilot_en_mac_v3_0_0.ppn",
+    "sensitivity": 0.5
+  }
+}
+```
+
+> Wake word automatically pauses while you're recording and resumes after transcription completes.
+
+---
+
 ## Passing Flags to Copilot
 
 Any arguments after `copilot+` are forwarded directly to `copilot`:
@@ -144,7 +258,22 @@ Settings are stored at `~/.copilot/copilot-plus.json` (created automatically on 
 {
   "modelPath": "/opt/homebrew/share/whisper.cpp/models/ggml-base.en.bin",
   "audioDevice": ":2",
-  "autoSubmit": false
+  "autoSubmit": false,
+  "firstRunComplete": true,
+  "macros": {
+    "1": "Write unit tests for this code",
+    "2": "Explain this code step by step"
+  },
+  "dictation": {
+    "enabled": false,
+    "chunkSeconds": 4
+  },
+  "wakeWord": {
+    "enabled": false,
+    "accessKey": "",
+    "keywordPath": "",
+    "sensitivity": 0.5
+  }
 }
 ```
 
@@ -153,6 +282,14 @@ Settings are stored at `~/.copilot/copilot-plus.json` (created automatically on 
 | `modelPath` | auto-detected | Path to your whisper `.bin` model file |
 | `audioDevice` | **auto-detected** | ffmpeg audio input. Set interactively via `copilot+ --setup`, or override manually. macOS: index like `":2"`. Windows: device name like `"Microphone (Realtek Audio)"`. |
 | `autoSubmit` | `false` | `true` = automatically press Enter after transcription |
+| `firstRunComplete` | `false` | Set to `true` after onboarding wizard completes |
+| `macros` | all empty | Prompt macros for Ctrl+1–9. Keys are `"1"` through `"9"`. |
+| `dictation.enabled` | `false` | Enable continuous dictation mode |
+| `dictation.chunkSeconds` | `4` | Length of each dictation recording chunk |
+| `wakeWord.enabled` | `false` | Enable wake word detection |
+| `wakeWord.accessKey` | `""` | Picovoice AccessKey (free at console.picovoice.ai) |
+| `wakeWord.keywordPath` | `""` | Path to custom `.ppn` keyword file (empty = built-in "computer") |
+| `wakeWord.sensitivity` | `0.5` | Detection sensitivity (0.0–1.0, higher = more sensitive) |
 
 ### Finding your microphone
 
@@ -194,22 +331,27 @@ Then update `modelPath` in `~/.copilot/copilot-plus.json`.
 ## How It Works
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  copilot+ (PTY wrapper)                                  │
-│                                                          │
-│  Your keystrokes ──► intercept Ctrl+R / Ctrl+P           │
-│                            │               │             │
-│                            ▼               ▼             │
-│                      ffmpeg mic      screencapture -i    │
-│                      + whisper-cli   (Win: Snip & Sketch) │
-│                            │               │             │
-│                            └───────┬───────┘             │
-│                                    ▼                     │
-│                         inject text / @filepath          │
-│                                    │                     │
-│  copilot ◄─────────────────────────┘                    │
-│  (all other keystrokes pass through unchanged)           │
-└──────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│  copilot+ (PTY wrapper)                                            │
+│                                                                    │
+│  Your keystrokes ──► intercept hotkeys                             │
+│                      ├── Ctrl+R  → voice toggle / dictation stop   │
+│                      ├── Ctrl+P  → screenshot picker               │
+│                      ├── Ctrl+/  → command palette overlay          │
+│                      ├── Ctrl+1–9 → inject prompt macro            │
+│                      │                                             │
+│                      ▼                                             │
+│         ┌─────────────┬──────────────┬───────────────┐             │
+│         │ ffmpeg mic   │ screencapture │ Porcupine     │            │
+│         │ + whisper-cli│ / Snip&Sketch │ (wake word)   │            │
+│         └──────┬───────┴──────┬───────┴───────┬───────┘            │
+│                └──────────────┴───────────────┘                    │
+│                              ▼                                     │
+│                   inject text / @filepath / macro                   │
+│                              │                                     │
+│  copilot ◄───────────────────┘                                     │
+│  (all other keystrokes pass through unchanged)                     │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 Transcription is 100% local — whisper.cpp runs on your machine, nothing is sent to any server.

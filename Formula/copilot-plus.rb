@@ -42,8 +42,10 @@ class CopilotPlus < Formula
         copilot+ --setup
 
       Hotkeys inside copilot+:
-        Ctrl+R  →  Start / stop voice recording
-        Ctrl+P  →  Take a screenshot (attached as @path)
+        Ctrl+R    →  Start / stop voice recording
+        Ctrl+P    →  Take a screenshot (attached as @path)
+        Ctrl+/    →  Open command palette
+        Ctrl+1–9  →  Execute a prompt macro (CSI u terminals)
     EOS
   end
 

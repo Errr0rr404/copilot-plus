@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const cfg = require('../src/config');
 const CopilotWrapper = require('../src/wrapper');
+const { runOnboarding } = require('../src/onboarding');
 
 const IS_WIN = os.platform() === 'win32';
 // `which` on Unix, `where` on Windows
@@ -17,12 +18,29 @@ if (process.argv.includes('--setup')) {
   return;
 }
 
-// ─── Normal mode ───────────────────────────────────────────────────────────────
-const config = cfg.load();
-const args = process.argv.slice(2);
+// ─── Preferences mode ──────────────────────────────────────────────────────────
+if (process.argv.includes('--preferences')) {
+  const config = cfg.load();
+  runOnboarding(config).then(() => process.exit(0)).catch(err => {
+    console.error('Error:', err.message);
+    process.exit(1);
+  });
+  return;
+}
 
-const wrapper = new CopilotWrapper(args, config);
-wrapper.start();
+// ─── Normal mode ───────────────────────────────────────────────────────────────
+(async () => {
+  let config = cfg.load();
+  const args = process.argv.slice(2);
+
+  // First-run onboarding
+  if (!config.firstRunComplete && process.stdin.isTTY) {
+    config = await runOnboarding(config);
+  }
+
+  const wrapper = new CopilotWrapper(args, config);
+  wrapper.start();
+})();
 
 // ─── Setup helper ──────────────────────────────────────────────────────────────
 function runSetup() {
@@ -90,8 +108,12 @@ function runSetup() {
   setTimeout(() => {
     console.log('\n─────────────────────────────────────');
     console.log('Config:', cfg.CONFIG_PATH);
-    console.log(`  modelPath:   ${config.modelPath || '(not set)'}`);
-    console.log(`  autoSubmit:  ${config.autoSubmit}   (auto-press Enter after transcription)`);
+    console.log(`  modelPath:      ${config.modelPath || '(not set)'}`);
+    console.log(`  autoSubmit:     ${config.autoSubmit}   (auto-press Enter after transcription)`);
+    console.log(`  dictation:      ${config.dictation.enabled ? 'enabled' : 'disabled'}`);
+    console.log(`  wake word:      ${config.wakeWord.enabled ? 'enabled' : 'disabled'}${config.wakeWord.keywordPath ? ` (${config.wakeWord.keywordPath})` : config.wakeWord.enabled ? ' (keyword: computer)' : ''}`);
+    const macroCount = Object.values(config.macros).filter(Boolean).length;
+    console.log(`  macros:         ${macroCount}/9 configured`);
 
     // List available audio input devices and let the user pick
     const devices = cfg.listMicDevices();
@@ -149,10 +171,13 @@ function runSetup() {
 function printHotkeysAndExit(allGood) {
   console.log('  Ctrl+R  →  Start / stop voice recording');
   console.log('  Ctrl+P  →  Take a screenshot (injected as @path)');
+  console.log('  Ctrl+/  →  Open command palette');
+  console.log('  Ctrl+1–9 →  Execute prompt macro (CSI u terminals)');
   console.log('\nUsage:');
-  console.log('  copilot+              →  launch copilot with voice + screenshot support');
-  console.log('  copilot+ --setup      →  show this screen');
-  console.log('  copilot+ --help       →  pass --help through to copilot\n');
+  console.log('  copilot+                →  launch copilot with all enhancements');
+  console.log('  copilot+ --setup        →  show this screen');
+  console.log('  copilot+ --preferences  →  configure dictation, wake word, macros');
+  console.log('  copilot+ --help         →  pass --help through to copilot\n');
 
   if (allGood) {
     console.log('✅  All dependencies found. Run `copilot+` to start!\n');

@@ -155,6 +155,17 @@ function findWhisperModel() {
   return WHISPER_MODEL_CANDIDATES.find(p => fs.existsSync(p)) || null;
 }
 
+function defaultConfig() {
+  return {
+    modelPath: findWhisperModel(),
+    autoSubmit: false,
+    firstRunComplete: false,
+    macros: { 1: '', 2: '', 3: '', 4: '', 5: '', 6: '', 7: '', 8: '', 9: '' },
+    dictation: { enabled: false, chunkSeconds: 4 },
+    wakeWord: { enabled: false, accessKey: '', keywordPath: '', sensitivity: 0.5 },
+  };
+}
+
 function load() {
   const fileConfig = fs.existsSync(CONFIG_PATH)
     ? (() => { try { return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')); } catch { return {}; } })()
@@ -164,12 +175,15 @@ function load() {
   const defaultDevice = os.platform() === 'win32' ? null : ':0';
   const audioDevice = fileConfig.audioDevice || detectMicrophone() || defaultDevice;
 
-  const defaults = {
-    modelPath: findWhisperModel(),
-    autoSubmit: false,
-  };
+  const defaults = defaultConfig();
 
-  return Object.assign(defaults, fileConfig, { audioDevice });
+  // Deep-merge nested objects so partial config doesn't obliterate defaults
+  const merged = Object.assign({}, defaults, fileConfig, { audioDevice });
+  merged.macros = Object.assign({}, defaults.macros, fileConfig.macros);
+  merged.dictation = Object.assign({}, defaults.dictation, fileConfig.dictation);
+  merged.wakeWord = Object.assign({}, defaults.wakeWord, fileConfig.wakeWord);
+
+  return merged;
 }
 
 function save(config) {
