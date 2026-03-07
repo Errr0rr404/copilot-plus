@@ -2,10 +2,10 @@
 # brew install copilot-plus
 
 class CopilotPlus < Formula
-  desc "Voice + screenshot input wrapper for GitHub Copilot CLI"
+  desc "Voice + screenshots + model hotkeys + live agent monitor for GitHub Copilot CLI"
   homepage "https://github.com/Errr0rr404/copilot-plus"
-  url "https://github.com/Errr0rr404/copilot-plus/archive/refs/tags/v1.0.24.tar.gz"
-  sha256 "8080be76095a9f45c2d8e683e9a7f13f2e43782c73eda700da0a4c0a78702b57"
+  url "https://github.com/Errr0rr404/copilot-plus/archive/refs/tags/v1.0.25.tar.gz"
+  sha256 "45414a6e78ee7d84f227a1685cc74141852dbd75defc6d062033f9f79387ffd6"
   license "MIT"
 
   depends_on "node"
@@ -49,6 +49,9 @@ class CopilotPlus < Formula
         Ctrl+Shift+1–4      →  Switch workhorse model slot (kitty/WezTerm)
         Option+1–9          →  Execute a prompt macro (macOS Apple Terminal)
         Ctrl+1–9            →  Execute a prompt macro (kitty/WezTerm/Windows Terminal)
+
+      Monitor all running copilot sessions:
+        copilot+ --monitor
     EOS
   end
 
