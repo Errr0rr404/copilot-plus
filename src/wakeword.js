@@ -24,15 +24,16 @@ function _editDistance(a, b) {
 }
 
 /**
- * WakeWordListener — always-on keyword detection using whisper.cpp + VAD.
+ * WakeWordListener — always-on keyword detection using whisper.cpp.
  *
- * Records short audio chunks continuously. When VAD detects speech,
- * whisper transcribes it and checks if the transcription contains the
- * configured wake phrase. No extra dependencies — uses the same
- * whisper-cli and ffmpeg already required by voice recording.
+ * Records short audio chunks continuously. Whisper transcribes each chunk
+ * and checks if it contains the configured wake phrase (or just the keyword
+ * without leading filler words like "hey"). Fuzzy matching handles slight
+ * transcription errors for unfamiliar proper nouns like "Copilot".
  *
  * Events:
- *   'detected' ()      — wake phrase heard
+ *   'detected' ()       — wake phrase heard
+ *   'heard'    (string) — any speech transcribed (for debug title display)
  *   'error'    (Error)  — non-fatal error
  */
 class WakeWordListener extends EventEmitter {
@@ -84,7 +85,7 @@ class WakeWordListener extends EventEmitter {
       if (!fs.existsSync(audioFile)) return;
 
       const text = await this._transcribe(audioFile);
-      if (text) this.emit('heard', text);
+      if (text && this._listening) this.emit('heard', text);
       if (this._matchesWakePhrase(text)) {
         this.emit('detected');
       }
@@ -141,18 +142,38 @@ class WakeWordListener extends EventEmitter {
     const phrase = ((this.config.wakeWord && this.config.wakeWord.phrase) || 'hey copilot')
       .toLowerCase()
       .trim();
-    // Strip punctuation so "Hey, Copilot." still matches.
-    const normalized = text.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (normalized.includes(phrase)) return true;
 
-    // Fuzzy fallback: every word in the phrase must appear close enough
-    // (within edit distance ~25% of word length) in the transcription.
-    // Handles mishearings like "coballot" → "copilot".
+    // Strip punctuation so "Hey, Copilot." or "Hey Copilot!" both normalize cleanly.
+    const normalized = text.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    // Build variants to match against:
+    //   1. Full phrase:        "hey copilot"
+    //   2. Without leading fillers: "copilot"  (so saying just "Copilot" also works)
+    const fillers = new Set(['hey', 'ok', 'okay', 'hi', 'hello', 'yo']);
     const phraseWords = phrase.split(/\s+/);
-    const textWords = normalized.split(/\s+/);
-    return phraseWords.every(pw =>
-      textWords.some(tw => _editDistance(pw, tw) <= Math.floor(pw.length / 4))
-    );
+    const phrasesToTry = [phraseWords];
+    let i = 0;
+    while (i < phraseWords.length - 1 && fillers.has(phraseWords[i])) i++;
+    if (i > 0) phrasesToTry.push(phraseWords.slice(i));
+
+    const textWords = normalized.split(/\s+/).filter(w => w.length > 0);
+    if (textWords.length === 0) return false;
+
+    for (const pWords of phrasesToTry) {
+      // Exact substring match first (fast path).
+      if (normalized.includes(pWords.join(' '))) return true;
+
+      // Fuzzy match: each phrase word must find a close-enough word in the transcription.
+      // Tolerance = max(1, round(40% of word length)) so:
+      //   "hey"     (3) → 1 edit   "copilot" (7) → 3 edits
+      // This handles "coballot" → "copilot" (distance 3).
+      if (pWords.every(pw => {
+        const maxDist = Math.max(1, Math.round(pw.length * 0.4));
+        return textWords.some(tw => _editDistance(pw, tw) <= maxDist);
+      })) return true;
+    }
+
+    return false;
   }
 
   _findTinyModel() {
