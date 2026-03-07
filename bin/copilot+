@@ -152,6 +152,11 @@ function runSetup() {
               let rawConfig = {};
               try { rawConfig = JSON.parse(fs.readFileSync(cfg.CONFIG_PATH, 'utf8')); } catch {}
               rawConfig.audioDevice = chosen.id;
+              // Fix stale model path if the saved one no longer exists
+              if (!rawConfig.modelPath || !fs.existsSync(rawConfig.modelPath)) {
+                const found = cfg.findWhisperModel();
+                if (found) rawConfig.modelPath = found;
+              }
               cfg.save(rawConfig);
               console.log(`✅  Audio device set to: ${chosen.name}  (${chosen.id})\n`);
             } else {
@@ -171,8 +176,9 @@ function runSetup() {
 function printHotkeysAndExit(allGood) {
   console.log('  Ctrl+R  →  Start / stop voice recording');
   console.log('  Ctrl+P  →  Take a screenshot (injected as @path)');
-  console.log('  Ctrl+/  →  Open command palette');
-  console.log('  Ctrl+1–9 →  Execute prompt macro (CSI u terminals)');
+  console.log('  Ctrl+K  →  Open command palette');
+  console.log('  Option+1–9 →  Execute prompt macro (enable "Use Option as Meta Key" in Terminal settings)');
+  console.log('  Ctrl+1–9   →  Execute prompt macro (CSI u terminals: kitty, WezTerm)');
   console.log('\nUsage:');
   console.log('  copilot+                →  launch copilot with all enhancements');
   console.log('  copilot+ --setup        →  show this screen');

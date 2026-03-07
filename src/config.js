@@ -177,8 +177,14 @@ function load() {
 
   const defaults = defaultConfig();
 
+  // Auto-heal stale modelPath: if the saved path no longer exists, re-detect
+  let modelPath = fileConfig.modelPath;
+  if (modelPath && !fs.existsSync(modelPath)) {
+    modelPath = findWhisperModel();
+  }
+
   // Deep-merge nested objects so partial config doesn't obliterate defaults
-  const merged = Object.assign({}, defaults, fileConfig, { audioDevice });
+  const merged = Object.assign({}, defaults, fileConfig, { audioDevice, modelPath });
   merged.macros = Object.assign({}, defaults.macros, fileConfig.macros);
   merged.dictation = Object.assign({}, defaults.dictation, fileConfig.dictation);
   merged.wakeWord = Object.assign({}, defaults.wakeWord, fileConfig.wakeWord);

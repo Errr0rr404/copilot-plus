@@ -1,15 +1,16 @@
 'use strict';
 
 /**
- * MacroManager — resolves Ctrl+1–9 keypresses to stored prompt text.
+ * MacroManager — resolves macro keypresses to stored prompt text.
  *
- * Ctrl+1–9 are detected via CSI u encoding:
- *   Ctrl+1 = \x1b[49;5u   (49 = ASCII '1')
- *   ...
- *   Ctrl+9 = \x1b[57;5u   (57 = ASCII '9')
+ * Two encodings are supported:
+ *   CSI u  (kitty/WezTerm)  — Ctrl+1–9: \x1b[49;5u … \x1b[57;5u
+ *   Meta   (Apple Terminal) — Option+1–9: \x1b1 … \x1b9
+ *                             Requires "Use Option as Meta Key" in Terminal → Settings → Keyboard
  */
 
 const CSI_U_RE = /^\x1b\[(\d+);5u$/;
+const META_DIGIT_RE = /^\x1b([1-9])$/;
 
 class MacroManager {
   constructor(cfg) {
@@ -17,15 +18,23 @@ class MacroManager {
   }
 
   /**
-   * Try to parse a raw input chunk as a Ctrl+N macro key.
+   * Try to parse a raw input chunk as a macro key.
    * Returns the slot number (1–9) or null.
    */
   parseSlot(data) {
     const str = typeof data === 'string' ? data : data.toString();
-    const m = CSI_U_RE.exec(str);
-    if (!m) return null;
-    const code = parseInt(m[1], 10);
-    if (code >= 49 && code <= 57) return code - 48; // 49='1' → slot 1
+
+    // CSI u: Ctrl+1–9 (kitty, WezTerm)
+    const csi = CSI_U_RE.exec(str);
+    if (csi) {
+      const code = parseInt(csi[1], 10);
+      if (code >= 49 && code <= 57) return code - 48;
+    }
+
+    // Meta+digit: Option+1–9 (Apple Terminal with "Use Option as Meta Key")
+    const meta = META_DIGIT_RE.exec(str);
+    if (meta) return parseInt(meta[1], 10);
+
     return null;
   }
 

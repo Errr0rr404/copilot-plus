@@ -18,7 +18,7 @@ const IS_WIN = os.platform() === 'win32';
 const CTRL_R = '\x12';  // voice toggle
 const CTRL_P = '\x10';  // screenshot
 const CTRL_C = '\x03';
-const CTRL_SLASH = '\x1f'; // command palette
+const CTRL_K = '\x0b'; // command palette
 
 /** Resolve the absolute path to a binary so node-pty's posix_spawnp can find it. */
 function resolveBin(name) {
@@ -53,7 +53,10 @@ class CopilotWrapper {
 
     this._shell = shell;
 
-    shell.onData(data => process.stdout.write(data));
+    shell.onData(data => {
+      // Suppress copilot output while the palette is open to avoid overwriting the overlay
+      if (!this.palette.isOpen) process.stdout.write(data);
+    });
     shell.onExit(({ exitCode }) => process.exit(exitCode));
 
     process.stdout.on('resize', () => {
@@ -117,8 +120,8 @@ class CopilotWrapper {
       return;
     }
 
-    // Ctrl+/ → command palette
-    if (key === CTRL_SLASH) {
+    // Ctrl+K → command palette
+    if (key === CTRL_K) {
       this._openPalette();
       return;
     }
@@ -173,16 +176,37 @@ class CopilotWrapper {
     // Add macro entries
     for (let i = 1; i <= 9; i++) {
       const prompt = this.macros.get(i);
-      const preview = prompt ? (prompt.length > 30 ? prompt.slice(0, 27) + '…' : prompt) : '(empty)';
-      actions.push({ id: `macro-${i}`, label: `⌨️   Macro ${i}: ${preview}`, hint: `Ctrl+${i}` });
+      const preview = prompt ? (prompt.length > 25 ? prompt.slice(0, 22) + '…' : prompt) : '(empty — press Enter to set)';
+      actions.push({
+        id: `macro-${i}`,
+        label: `⌨️   Macro ${i}: ${preview}`,
+        hint: `Ctrl+${i}`,
+        editable: true,
+        value: prompt || '',
+      });
     }
 
     actions.push({ id: 'preferences', label: '⚙️   Open Preferences', hint: '--preferences' });
 
-    this.palette.open(actions).then(actionId => {
+    this.palette.open(actions).then(result => {
       this._nudgeResize(); // repaint copilot TUI after palette closes
-      if (!actionId) return;
-      this._executePaletteAction(actionId);
+      if (!result) return;
+
+      // Editable item (macro) resolved with {id, value, run}
+      if (typeof result === 'object') {
+        const slot = parseInt(result.id.split('-')[1], 10);
+        this.macros.set(slot, result.value);
+        // Persist to config file
+        this.cfg.macros = Object.assign({}, this.cfg.macros, { [slot]: result.value });
+        config.save(this.cfg);
+        this._notify(`⌨️ Macro ${slot} saved`, result.value.length > 50 ? result.value.slice(0, 47) + '…' : result.value || '(cleared)');
+        if (result.run && result.value) {
+          this._shell.write(result.value + (this.cfg.autoSubmit ? '\r' : ''));
+        }
+        return;
+      }
+
+      this._executePaletteAction(result);
     });
   }
 
