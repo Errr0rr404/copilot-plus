@@ -110,8 +110,7 @@ function runSetup() {
     console.log('Config:', cfg.CONFIG_PATH);
     console.log(`  modelPath:      ${config.modelPath || '(not set)'}`);
     console.log(`  autoSubmit:     ${config.autoSubmit}   (auto-press Enter after transcription)`);
-    console.log(`  dictation:      ${config.dictation.enabled ? 'enabled' : 'disabled'}`);
-    console.log(`  wake word:      ${config.wakeWord.enabled ? 'enabled' : 'disabled'}${config.wakeWord.keywordPath ? ` (${config.wakeWord.keywordPath})` : config.wakeWord.enabled ? ' (keyword: computer)' : ''}`);
+    console.log(`  voice activation: ${config.wakeWord && config.wakeWord.enabled ? `enabled (phrase: "${config.wakeWord.phrase || 'hey copilot'}")` : 'disabled'}`);
     const macroCount = Object.values(config.macros).filter(Boolean).length;
     console.log(`  macros:         ${macroCount}/9 configured`);
 
@@ -182,7 +181,7 @@ function printHotkeysAndExit(allGood) {
   console.log('\nUsage:');
   console.log('  copilot+                →  launch copilot with all enhancements');
   console.log('  copilot+ --setup        →  show this screen');
-  console.log('  copilot+ --preferences  →  configure dictation, wake word, macros');
+  console.log('  copilot+ --preferences  →  configure voice activation, macros');
   console.log('  copilot+ --help         →  pass --help through to copilot\n');
 
   if (allGood) {

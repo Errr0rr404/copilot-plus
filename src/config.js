@@ -161,7 +161,6 @@ function defaultConfig() {
     autoSubmit: false,
     firstRunComplete: false,
     macros: { 1: '', 2: '', 3: '', 4: '', 5: '', 6: '', 7: '', 8: '', 9: '' },
-    dictation: { enabled: false, chunkSeconds: 4 },
     wakeWord: { enabled: false, phrase: 'hey copilot', chunkSeconds: 2 },
   };
 }
@@ -186,7 +185,6 @@ function load() {
   // Deep-merge nested objects so partial config doesn't obliterate defaults
   const merged = Object.assign({}, defaults, fileConfig, { audioDevice, modelPath });
   merged.macros = Object.assign({}, defaults.macros, fileConfig.macros);
-  merged.dictation = Object.assign({}, defaults.dictation, fileConfig.dictation);
   merged.wakeWord = Object.assign({}, defaults.wakeWord, fileConfig.wakeWord);
 
   return merged;

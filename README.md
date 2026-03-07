@@ -131,8 +131,7 @@ Add context if you want (e.g. _"what's wrong with this?"_), then press **Enter**
 
 On your first launch of `copilot+`, an interactive onboarding wizard will ask about:
 
-- **Dictation mode** — continuous voice-to-text
-- **Wake word activation** — hands-free "hey copilot" (or "computer") keyword detection
+- **Voice Activation** — hands-free "hey copilot" keyword detection
 - **Prompt macros** — assign saved prompts to macro slots
 
 Your choices are saved to `~/.copilot/copilot-plus.json`. Re-run the wizard anytime:
@@ -149,8 +148,7 @@ Press **Ctrl+K** to open the command palette — a searchable overlay listing ev
 
 - 🎙 Voice Recording
 - 📸 Screenshot
-- 📝 Dictation Mode (toggle)
-- 🗣️ Wake Word (toggle)
+- 🗣️ Voice Activation (toggle on/off)
 - ⌨️ Macros 1–9 (execute or edit inline)
 - ⚙️ Open Preferences
 
@@ -195,50 +193,22 @@ You can also set them during onboarding, via `copilot+ --preferences`, or by edi
 
 ---
 
-## Dictation Mode
+## Voice Activation
 
-Dictation mode provides **continuous voice-to-text** — speak naturally and your words are transcribed and injected in real-time.
+Say **"hey copilot"** (or any phrase you choose) to start recording hands-free — no accounts, no API keys, no extra installs.
 
-- Toggle via the **command palette** (Ctrl+K → Dictation Mode) or press **Ctrl+R** while dictating to stop
-- Records in short chunks (default: 4 seconds), transcribes each, and injects the text
-- Uses the same local whisper-cli pipeline — no audio leaves your machine
-
-Configure chunk duration in `~/.copilot/copilot-plus.json`:
-
-```json
-{
-  "dictation": {
-    "enabled": false,
-    "chunkSeconds": 4
-  }
-}
-```
-
----
-
-## Wake Word Activation
-
-Say **"hey copilot"** (or any phrase you choose) to start voice recording hands-free — no accounts, no API keys, no extra installs.
-
-Uses **whisper.cpp + VAD** (Voice Activity Detection), which is already installed as part of copilot-plus. Whisper only processes audio when VAD detects speech, keeping CPU usage near zero when you're silent.
+**How it works:**
+1. Always listens for your wake phrase using whisper.cpp + VAD (near-zero CPU when silent)
+2. Phrase detected → recording starts automatically
+3. You speak your prompt
+4. You pause → transcription runs locally → text is injected into copilot
+5. Returns to listening — ready for the next "hey copilot"
 
 ### Setup
 
-Enable during onboarding (`copilot+` first run) or via `copilot+ --preferences`. You'll be asked for your wake phrase — anything works:
-
+Enable during first run or via `copilot+ --preferences`. Choose any wake phrase:
 - `"hey copilot"` (default)
-- `"ok computer"`
-- `"yo copilot"`
-- Any short, distinctive phrase
-
-### How it works
-
-1. Continuously records 2-second audio chunks
-2. VAD skips chunks with no speech — near-zero CPU when silent
-3. When speech is detected, whisper transcribes the chunk locally
-4. If the transcription contains your wake phrase, voice recording starts
-
-> Wake word automatically pauses while you're recording and resumes after transcription completes.
+- `"ok computer"`, `"yo copilot"`, or any short distinctive phrase
 
 ---
 
@@ -268,10 +238,6 @@ Settings are stored at `~/.copilot/copilot-plus.json` (created automatically on 
     "1": "Write unit tests for this code",
     "2": "Explain this code step by step"
   },
-  "dictation": {
-    "enabled": false,
-    "chunkSeconds": 4
-  },
   "wakeWord": {
     "enabled": false,
     "phrase": "hey copilot",
@@ -287,11 +253,9 @@ Settings are stored at `~/.copilot/copilot-plus.json` (created automatically on 
 | `autoSubmit` | `false` | `true` = automatically press Enter after transcription |
 | `firstRunComplete` | `false` | Set to `true` after onboarding wizard completes |
 | `macros` | all empty | Prompt macros. Keys are `"1"` through `"9"`. Edit via command palette (Ctrl+K) or `--preferences`. |
-| `dictation.enabled` | `false` | Enable continuous dictation mode |
-| `dictation.chunkSeconds` | `4` | Length of each dictation recording chunk |
-| `wakeWord.enabled` | `false` | Enable wake word detection |
+| `wakeWord.enabled` | `false` | Enable voice activation (wake phrase detection) |
 | `wakeWord.phrase` | `"hey copilot"` | The phrase to listen for — any words work |
-| `wakeWord.chunkSeconds` | `2` | Audio chunk length for wake word scanning |
+| `wakeWord.chunkSeconds` | `2` | Audio chunk length for wake phrase scanning |
 
 ### Finding your microphone
 
@@ -337,16 +301,16 @@ Then update `modelPath` in `~/.copilot/copilot-plus.json`.
 │  copilot+ (PTY wrapper)                                            │
 │                                                                    │
 │  Your keystrokes ──► intercept hotkeys                             │
-│                      ├── Ctrl+R      → voice toggle / dictation    │
-│                      ├── Ctrl+P      → screenshot picker           │
-│                      ├── Ctrl+K      → command palette overlay     │
-│                      ├── Option+1–9  → inject prompt macro (macOS) │
-│                      ├── Ctrl+1–9   → inject prompt macro (CSI u)  │
-│                      │                                             │
-│                      ▼                                             │
-│         ┌─────────────┬──────────────┬───────────────┐             │
-│         │ ffmpeg mic   │ screencapture │ whisper+VAD   │            │
-│         │ + whisper-cli│ / Snip&Sketch │ (wake word)   │            │
+│                      ├── Ctrl+R      → push-to-talk voice recording  │
+│                      ├── Ctrl+P      → screenshot picker              │
+│                      ├── Ctrl+K      → command palette overlay        │
+│                      ├── Option+1–9  → inject prompt macro (macOS)    │
+│                      ├── Ctrl+1–9   → inject prompt macro (CSI u)     │
+│                      │                                                │
+│                      ▼                                                │
+│         ┌─────────────┬──────────────┬───────────────┐               │
+│         │ ffmpeg mic   │ screencapture │ whisper+VAD   │              │
+│         │ + whisper-cli│ / Snip&Sketch │ (voice activ) │              │
 │         └──────┬───────┴──────┬───────┴───────┬───────┘            │
 │                └──────────────┴───────────────┘                    │
 │                              ▼                                     │

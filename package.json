@@ -1,6 +1,6 @@
 {
   "name": "copilot-plus",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "description": "Voice + screenshot input wrapper for GitHub Copilot CLI — use your mic and screen instead of typing",
   "bin": {
     "copilot+": "bin/copilot+"
