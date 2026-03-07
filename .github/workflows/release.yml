@@ -9,6 +9,8 @@ jobs:
   publish-npm:
     name: Publish to npm
     runs-on: ubuntu-latest
+    # Guard: only run when triggered by a version tag, not a branch commit
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
