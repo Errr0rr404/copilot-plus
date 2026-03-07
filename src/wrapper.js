@@ -2,7 +2,9 @@
 
 const pty = require('node-pty');
 const { execFile, execFileSync } = require('child_process');
+const fs = require('fs');
 const os = require('os');
+const path = require('path');
 
 const config = require('./config');
 const VoiceRecorder = require('./voice');
@@ -10,6 +12,11 @@ const screenshot = require('./screenshot');
 const MacroManager = require('./macros');
 const CommandPalette = require('./palette');
 const WakeWordListener = require('./wakeword');
+
+// Shared file used to coordinate wake word activation across multiple copilot+ instances.
+// Whichever instance the user most recently typed in is considered "active" and will
+// exclusively handle wake word detection responses.
+const ACTIVE_PID_FILE = path.join(os.homedir(), '.copilot', 'copilot-plus-active.pid');
 
 const IS_WIN = os.platform() === 'win32';
 
@@ -60,12 +67,20 @@ class CopilotWrapper {
 
     process.stdin.setRawMode(true);
     process.stdin.resume();
-    process.stdin.on('data', data => this._handleInput(data));
+    process.stdin.on('data', data => {
+      this._markActive();
+      this._handleInput(data);
+    });
 
     // Voice activation: wake phrase -> record until pause -> inject -> resume listening
     if (this.cfg.wakeWord && this.cfg.wakeWord.enabled) {
+      // Mark this instance active on startup so the first-opened tab wins by default.
+      this._markActive();
+
       this.wakeWord.on('detected', () => {
         if (this._busy || this.voice.isRecording) return;
+        // Only the instance the user most recently typed in should respond.
+        if (!this._isActiveInstance()) return;
         this._startVoiceAutoStop();
       });
       this.wakeWord.on('error', err => {
@@ -338,6 +353,27 @@ class CopilotWrapper {
       this._shell.resize(cols, rows + 1);
       setTimeout(() => { try { this._shell.resize(cols, rows); } catch {} }, 60);
     } catch {}
+  }
+
+  /** Write this process's PID to the shared active-instance file. */
+  _markActive() {
+    try {
+      fs.mkdirSync(path.dirname(ACTIVE_PID_FILE), { recursive: true });
+      fs.writeFileSync(ACTIVE_PID_FILE, String(process.pid));
+    } catch {}
+  }
+
+  /**
+   * Returns true if this process is the "last focused" copilot+ instance.
+   * Used to ensure only one tab handles wake word activation at a time.
+   */
+  _isActiveInstance() {
+    try {
+      const pid = parseInt(fs.readFileSync(ACTIVE_PID_FILE, 'utf8').trim(), 10);
+      return pid === process.pid;
+    } catch {
+      return true; // If the file doesn't exist, assume we're the only instance.
+    }
   }
 
   _setTitle(title) {

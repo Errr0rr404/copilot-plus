@@ -102,7 +102,6 @@ class WakeWordListener extends EventEmitter {
       execFile('whisper-cli', [
         '-m', tinyModel,
         '-f', audioFile,
-        '--vad',          // skip silent segments
         '-np',            // no extra prints
         '-nt',            // no timestamps
       ], { timeout: 10000 }, (err, stdout) => {
