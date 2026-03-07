@@ -34,15 +34,13 @@ jobs:
     name: Update Homebrew formula SHA
     runs-on: ubuntu-latest
     needs: publish-npm
-    # Only runs when HOMEBREW_TAP_TOKEN secret is configured
-    if: env.HOMEBREW_TAP_TOKEN != ''
-    env:
-      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    # continue-on-error so missing HOMEBREW_TAP_TOKEN doesn't fail the release
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
           repository: Errr0rr404/homebrew-copilot-plus
-          token: ${{ env.HOMEBREW_TAP_TOKEN }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-copilot-plus
 
       - name: Compute npm tarball sha256
