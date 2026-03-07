@@ -1,129 +1,106 @@
 # talk-to-copilot
 
-A transparent PTY wrapper for [GitHub Copilot CLI](https://github.com/github/copilot-cli) that adds **voice input** and **screenshot attachment** — without changing how you use Copilot at all.
+> Talk to [GitHub Copilot CLI](https://docs.github.com/copilot/concepts/agents/about-copilot-cli) with your voice — and share screenshots — without leaving your terminal.
 
-Run `ttc` instead of `copilot`. Everything works identically, plus two new hotkeys.
+`ttc` is a drop-in replacement for the `copilot` command. It wraps Copilot CLI transparently and adds two hotkeys:
 
-```
-Ctrl+R  →  Start / stop voice recording  (transcription injected as text)
-Ctrl+P  →  Interactive screenshot picker  (injected as @/path/to/file.png)
-```
+| Hotkey | What it does |
+|--------|-------------|
+| **Ctrl+R** | Start / stop voice recording → transcription is typed into your prompt |
+| **Ctrl+P** | Screenshot picker → file path is injected as `@/path/screenshot.png` |
+
+Everything else — all Copilot features, slash commands, modes — works exactly as normal.
+
+---
+
+## Requirements
+
+- **macOS** (uses `avfoundation` for mic input and `screencapture` for screenshots)
+- **[GitHub Copilot CLI](https://docs.github.com/copilot/concepts/agents/about-copilot-cli)** — must be installed and authenticated
+- **Node.js ≥ 18** — `brew install node`
+- **ffmpeg** — `brew install ffmpeg`
+- **whisper.cpp** — `brew install whisper-cpp`
+
+> **Apple Silicon:** The `base.en` model transcribes in ~1–2 s on M1/M2/M3. Use `small.en` for better accuracy at ~3–4 s.
 
 ---
 
 ## Installation
-
-### Homebrew (recommended — installs ffmpeg + whisper-cpp automatically)
-
-```bash
-brew tap Errr0rr404/ttc
-brew install ttc
-whisper-cpp-download-ggml-model base.en   # one-time: download speech model
-ttc --setup                               # verify everything is ready
-```
-
-### npm
 
 ```bash
 npm install -g talk-to-copilot
-# You still need ffmpeg and whisper-cpp:
-brew install ffmpeg whisper-cpp
-whisper-cpp-download-ggml-model base.en
-ttc --setup
 ```
 
----
-
-## How it works
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  ttc (PTY wrapper)                                      │
-│                                                          │
-│  stdin ──► intercept Ctrl+R / Ctrl+P                    │
-│              │                           │               │
-│              ▼                           ▼               │
-│         voice recorder            screencapture -i       │
-│         ffmpeg + whisper-cli      saves PNG to /tmp      │
-│              │                           │               │
-│              └──────────┬────────────────┘               │
-│                         ▼                                │
-│                  inject text / @path                     │
-│                         │                                │
-│  copilot (PTY child) ◄──┘  (all other keystrokes pass   │
-│                             through unchanged)           │
-└─────────────────────────────────────────────────────────┘
-```
-
-Transcriptions are injected as raw text — **no Enter is pressed automatically** so you can review and edit before sending. Screenshots are injected as `@/tmp/copilot-screenshots/screenshot-<ts>.png` which Copilot CLI's `@` file-mention picks up.
-
----
-
-## Prerequisites
-
-| Tool | Install |
-|------|---------|
-| [GitHub Copilot CLI](https://github.com/github/copilot-cli) | see their docs |
-| [ffmpeg](https://ffmpeg.org) | `brew install ffmpeg` |
-| [whisper.cpp](https://github.com/ggerganov/whisper.cpp) | `brew install whisper-cpp` |
-| A whisper model | `whisper-cpp-download-ggml-model base.en` |
-| Node.js ≥ 18 | `brew install node` |
-
-> **Apple Silicon note:** The `base.en` model runs in ~1–2 s on M1/M2/M3. Use `small.en` for better accuracy at ~3–4 s.
-
----
-
-## Installation
+Then install the speech dependencies if you haven't already:
 
 ```bash
-git clone https://github.com/yourname/talk-to-copilot
-cd talk-to-copilot
-npm install
-npm link          # makes `ttc` available system-wide
+brew install ffmpeg whisper-cpp
+whisper-cpp-download-ggml-model base.en
 ```
 
 Verify everything is wired up:
 
 ```bash
-talk --setup
+ttc --setup
 ```
+
+You should see all green checkmarks. If anything is missing, the setup output tells you exactly what to fix.
 
 ---
 
-## Usage
+## Quick Start
 
 ```bash
-talk              # drop-in replacement for `copilot`
-talk --setup      # check dependencies and show config
+ttc
 ```
 
-Any flags you pass are forwarded to `copilot` directly:
+That's it. You're now inside Copilot CLI with voice and screenshot support active.
+
+---
+
+## Using Voice Input
+
+1. **Press `Ctrl+R`** to start recording.
+   A macOS notification appears and your terminal title changes to `🎙 Recording…`
+
+2. **Speak your prompt** naturally — e.g. _"refactor this function to use async await"_
+
+3. **Press `Ctrl+R` again** to stop.
+   Transcription runs locally (`⏳ Transcribing…`) — no audio ever leaves your machine.
+
+4. **Your words appear as text** in the Copilot prompt. Review and edit if needed, then press **Enter** to send.
+
+> Press **Ctrl+C** while recording to cancel without transcribing.
+
+---
+
+## Using Screenshots
+
+1. **Press `Ctrl+P`** — the macOS screenshot overlay opens (same UI as `⌘⇧4`).
+
+2. **Click and drag** to select any area of your screen — a browser error, a UI bug, a diagram, anything.
+
+3. **The file path is injected** into your prompt as `@/tmp/copilot-screenshots/screenshot-<timestamp>.png`.
+
+4. **Add context** if you want (e.g. _"what's wrong with this?"_), then press **Enter**.
+
+---
+
+## Passing Flags to Copilot
+
+Any arguments after `ttc` are forwarded directly to `copilot`:
 
 ```bash
-talk --experimental
-talk --banner
+ttc --experimental
+ttc --banner
+ttc --help
 ```
-
-### Voice recording
-
-1. Press **Ctrl+R** — the terminal title changes to `🎙 Recording…` and a macOS notification appears.
-2. Speak your prompt.
-3. Press **Ctrl+R** again — transcription begins (`⏳ Transcribing…`).
-4. The transcribed text appears in the Copilot input. Review it, then press **Enter** to send.
-5. Press **Ctrl+C** while recording to cancel without transcribing.
-
-### Screenshot
-
-1. Press **Ctrl+P** — the macOS screenshot overlay appears (same as ⌘⇧4).
-2. Draw a selection around the area you want to share.
-3. The path is injected as `@/tmp/copilot-screenshots/screenshot-<ts>.png`.
-4. Type any additional context, then press **Enter**.
 
 ---
 
 ## Configuration
 
-Config is stored at `~/.copilot/talk-to-copilot.json`:
+Settings are stored at `~/.copilot/talk-to-copilot.json` and created automatically on first run.
 
 ```json
 {
@@ -135,22 +112,91 @@ Config is stored at `~/.copilot/talk-to-copilot.json`:
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `modelPath` | auto-detected | Path to your `.bin` whisper model |
-| `audioDevice` | `:0` | ffmpeg avfoundation mic index (run `ffmpeg -f avfoundation -list_devices true -i ""` to list) |
-| `autoSubmit` | `false` | Set to `true` to auto-press Enter after transcription |
+| `modelPath` | auto-detected | Path to your whisper `.bin` model file |
+| `audioDevice` | `:0` | ffmpeg avfoundation audio input index |
+| `autoSubmit` | `false` | `true` = automatically press Enter after transcription |
+
+### Finding your microphone index
+
+```bash
+ffmpeg -f avfoundation -list_devices true -i "" 2>&1 | grep AVFoundation
+```
+
+Look for your microphone in the output. The number in brackets (e.g. `[2]`) is the index — set `audioDevice` to `":2"`.
+
+### Available whisper models
+
+| Model | Size | Speed (M2) | Accuracy |
+|-------|------|------------|----------|
+| `tiny.en` | 75 MB | ~0.5 s | Good |
+| `base.en` | 142 MB | ~1 s | Better |
+| `small.en` | 466 MB | ~3 s | Best for most |
+
+```bash
+whisper-cpp-download-ggml-model small.en
+```
+
+Then update `modelPath` in `~/.copilot/talk-to-copilot.json`.
+
+---
+
+## How It Works
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  ttc (PTY wrapper)                                        │
+│                                                           │
+│  Your keystrokes ──► intercept Ctrl+R / Ctrl+P           │
+│                            │               │              │
+│                            ▼               ▼              │
+│                      ffmpeg mic      screencapture -i     │
+│                      + whisper-cli   saves PNG to /tmp    │
+│                            │               │              │
+│                            └───────┬───────┘              │
+│                                    ▼                      │
+│                         inject text / @filepath           │
+│                                    │                      │
+│  copilot ◄─────────────────────────┘                     │
+│  (all other keystrokes pass through unchanged)            │
+└──────────────────────────────────────────────────────────┘
+```
+
+Transcription is 100% local — whisper.cpp runs on your machine, nothing is sent to any server.
 
 ---
 
 ## Troubleshooting
 
-**`Error: could not open input device`**  
-Grant microphone access: *System Settings → Privacy & Security → Microphone → Terminal*.
+**`posix_spawnp failed` on first run**
+Run `npm install -g talk-to-copilot` again — the postinstall script will fix the permissions automatically.
 
-**`No whisper model found`**  
-Run `whisper-cpp-download-ggml-model base.en`, then `talk --setup` to verify.
+**Microphone not being captured / transcription is always the same word**
+Your `audioDevice` is pointing to the wrong input (e.g. a virtual audio device).
+Run the device listing command above and update `audioDevice` in your config.
 
-**Transcription is empty or garbled**  
-Try a larger model: `whisper-cpp-download-ggml-model small.en`, then update `modelPath` in your config.
+**`Error: could not open input device`**
+Grant microphone access to your terminal:
+*System Settings → Privacy & Security → Microphone → enable your terminal app*
 
-**Wrong microphone is used**  
-Run `ffmpeg -f avfoundation -list_devices true -i ""` and set `audioDevice` in the config (e.g. `":1"`).
+**`No whisper model found`**
+```bash
+whisper-cpp-download-ggml-model base.en
+ttc --setup   # confirm it's detected
+```
+
+**Transcription is inaccurate**
+Switch to a larger model:
+```bash
+whisper-cpp-download-ggml-model small.en
+```
+Then update `modelPath` in `~/.copilot/talk-to-copilot.json`.
+
+**Screenshot doesn't attach**
+Make sure Screen Recording permission is granted:
+*System Settings → Privacy & Security → Screen Recording → enable your terminal app*
+
+---
+
+## License
+
+MIT © [Errr0rr404](https://github.com/Errr0rr404)
