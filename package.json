@@ -1,6 +1,6 @@
 {
   "name": "talk-to-copilot",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Voice + screenshot input wrapper for GitHub Copilot CLI — use your mic and screen instead of typing",
   "bin": {
     "ttc": "bin/ttc"
