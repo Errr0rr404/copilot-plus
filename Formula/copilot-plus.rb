@@ -1,14 +1,11 @@
-# Place this file in a GitHub repo named: Errr0rr404/homebrew-copilot-plus
-# Users install with:
-#   brew tap Errr0rr404/copilot-plus
-#   brew install copilot-plus
+# brew tap Errr0rr404/copilot-plus
+# brew install copilot-plus
 
 class CopilotPlus < Formula
   desc "Voice + screenshot input wrapper for GitHub Copilot CLI"
   homepage "https://github.com/Errr0rr404/copilot-plus"
-  url "https://registry.npmjs.org/copilot-plus/-/copilot-plus-1.0.8.tgz"
-  # Run `npm view copilot-plus dist.shasum` after publishing and paste the sha256 here
-  sha256 "FILL_IN_AFTER_NPM_PUBLISH"
+  url "https://registry.npmjs.org/copilot-plus/-/copilot-plus-1.0.9.tgz"
+  sha256 "0b5fe9eb248c36cba8ded1552c719be36476a624aa5cf225ba6b5f3f287f11c2"
   license "MIT"
 
   depends_on "node"
