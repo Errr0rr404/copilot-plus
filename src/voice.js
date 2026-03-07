@@ -43,9 +43,79 @@ class VoiceRecorder {
   }
 
   /**
-   * Stop recording and transcribe. Returns the transcribed text, or '' if nothing was heard.
+   * Start recording and automatically stop after `silenceDuration` seconds of silence.
+   * Returns a Promise that resolves with the transcribed text when silence is detected.
+   * Maximum recording time is capped at `maxSeconds` to avoid runaway recordings.
+   *
+   * @param {object} opts
+   * @param {number} [opts.silenceDuration=1.5]  seconds of silence before auto-stop
+   * @param {number} [opts.silenceThreshold=-35]  dB threshold for silence detection
+   * @param {number} [opts.maxSeconds=30]          hard cap on recording length
    * @returns {Promise<string>}
    */
+  startAutoStop({ silenceDuration = 1.5, silenceThreshold = -35, maxSeconds = 30 } = {}) {
+    if (this._proc) return Promise.reject(new Error('Already recording'));
+    if (!this.config.audioDevice) {
+      return Promise.reject(new Error('No audio device configured. Run: copilot+ --setup'));
+    }
+
+    this._audioFile = path.join(os.tmpdir(), `copilot-voice-${Date.now()}.wav`);
+    const audioFile = this._audioFile;
+
+    // ffmpeg silencedetect filter — stops recording when silence is detected
+    const silenceFilter = `silencedetect=noise=${silenceThreshold}dB:duration=${silenceDuration}`;
+
+    const ffmpegArgs = IS_WIN
+      ? ['-f', 'dshow', '-i', `audio=${this.config.audioDevice}`,
+         '-af', silenceFilter, '-t', String(maxSeconds),
+         '-ar', '16000', '-ac', '1', '-y', audioFile]
+      : ['-f', 'avfoundation', '-i', this.config.audioDevice,
+         '-af', silenceFilter, '-t', String(maxSeconds),
+         '-ar', '16000', '-ac', '1', '-y', audioFile];
+
+    return new Promise((resolve, reject) => {
+      let stderrBuf = '';
+      const proc = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'ignore', 'pipe'] });
+      this._proc = proc;
+
+      let _qSent = false;
+      proc.stderr.on('data', chunk => {
+        stderrBuf += chunk.toString();
+        if (_qSent) return;
+        // Parse silence_start timestamp — only stop if silence began after 0.5s
+        // (to skip the brief ambient-noise silence at the very start of recording)
+        const hasSilenceStart = stderrBuf.split('\n').some(l => {
+          const m = l.match(/silence_start:\s*([\d.]+)/);
+          return m && parseFloat(m[1]) > 0.5;
+        });
+        if (hasSilenceStart) {
+          _qSent = true;
+          proc.stdin.write('q');
+          proc.stdin.end();
+        }
+      });
+
+      proc.on('exit', () => {
+        this._proc = null;
+        this._audioFile = null;
+        if (!fs.existsSync(audioFile)) {
+          return reject(new Error('Audio file was not created — is the microphone accessible?'));
+        }
+        this._transcribe(audioFile)
+          .then(resolve)
+          .catch(reject)
+          .finally(() => fs.unlink(audioFile, () => {}));
+      });
+
+      proc.on('error', err => {
+        this._proc = null;
+        this._audioFile = null;
+        reject(err);
+      });
+    });
+  }
+
+
   async stopAndTranscribe() {
     if (!this._proc) return '';
 
