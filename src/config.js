@@ -8,6 +8,9 @@ const CONFIG_PATH = path.join(os.homedir(), '.copilot', 'talk-to-copilot.json');
 
 const WHISPER_MODEL_CANDIDATES = [
   path.join(os.homedir(), '.copilot', 'whisper-model.bin'),
+  path.join(os.homedir(), '.copilot', 'models', 'ggml-base.en.bin'),
+  path.join(os.homedir(), '.copilot', 'models', 'ggml-small.en.bin'),
+  path.join(os.homedir(), '.copilot', 'models', 'ggml-tiny.en.bin'),
   path.join(__dirname, '..', 'models', 'ggml-base.en.bin'),
   path.join(__dirname, '..', 'models', 'ggml-small.en.bin'),
   path.join(__dirname, '..', 'models', 'ggml-tiny.en.bin'),

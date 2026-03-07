@@ -35,7 +35,18 @@ Then install the speech dependencies if you haven't already:
 
 ```bash
 brew install ffmpeg whisper-cpp
+```
+
+Download a whisper speech model (required for voice input):
+
+```bash
+# Option A — using the whisper-cpp helper script (if available)
 whisper-cpp-download-ggml-model base.en
+
+# Option B — direct download (works everywhere)
+mkdir -p ~/.copilot/models
+curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin" \
+  -o ~/.copilot/models/ggml-base.en.bin
 ```
 
 Verify everything is wired up:
@@ -180,9 +191,14 @@ Grant microphone access to your terminal:
 
 **`No whisper model found`**
 ```bash
+# Option A
 whisper-cpp-download-ggml-model base.en
-ttc --setup   # confirm it's detected
+# Option B (direct download, works if the script is missing)
+mkdir -p ~/.copilot/models
+curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin" \
+  -o ~/.copilot/models/ggml-base.en.bin
 ```
+Then run `ttc --setup` to confirm it's detected.
 
 **Transcription is inaccurate**
 Switch to a larger model:

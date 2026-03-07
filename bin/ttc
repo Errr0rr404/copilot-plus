@@ -65,7 +65,8 @@ function runSetup() {
         console.log(`✅  model        — ${model}`);
       } else {
         console.log('❌  model        — no model file found');
-        console.log('     Run: whisper-cpp-download-ggml-model base.en\n');
+        console.log('     Option A: whisper-cpp-download-ggml-model base.en');
+        console.log('     Option B: mkdir -p ~/.copilot/models && curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin -o ~/.copilot/models/ggml-base.en.bin\n');
         allGood = false;
       }
     }
