@@ -1,0 +1,7 @@
+models/
+Formula/
+.github/
+.gitignore
+*.wav
+*.png
+.DS_Store

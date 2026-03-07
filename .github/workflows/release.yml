@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm ci --ignore-scripts
+
+      - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  update-formula:
+    name: Update Homebrew formula SHA
+    runs-on: ubuntu-latest
+    needs: publish-npm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Errr0rr404/homebrew-ttc
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-ttc
+
+      - name: Compute npm tarball sha256
+        id: sha
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          URL="https://registry.npmjs.org/talk-to-copilot/-/talk-to-copilot-${VERSION}.tgz"
+          # Wait briefly for npm CDN to propagate
+          sleep 15
+          SHA=$(curl -sL "$URL" | sha256sum | awk '{print $1}')
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Patch formula
+        run: |
+          cd homebrew-ttc
+          sed -i "s|url \".*\"|url \"${{ steps.sha.outputs.url }}\"|" Formula/ttc.rb
+          sed -i "s|sha256 \".*\"|sha256 \"${{ steps.sha.outputs.sha }}\"|" Formula/ttc.rb
+
+      - name: Commit updated formula
+        run: |
+          cd homebrew-ttc
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "Update ttc to v${{ steps.sha.outputs.version }}"
+          git push

@@ -1,0 +1,5 @@
+node_modules/
+models/
+*.wav
+*.png
+.DS_Store

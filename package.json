@@ -1,0 +1,43 @@
+{
+  "name": "talk-to-copilot",
+  "version": "1.0.0",
+  "description": "Voice + screenshot input wrapper for GitHub Copilot CLI — use your mic and screen instead of typing",
+  "bin": {
+    "ttc": "./bin/ttc"
+  },
+  "scripts": {
+    "setup": "node bin/ttc --setup",
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/"
+  ],
+  "keywords": [
+    "copilot",
+    "github-copilot",
+    "voice",
+    "speech",
+    "whisper",
+    "cli",
+    "ai",
+    "screenshot"
+  ],
+  "author": "Errr0rr404",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Errr0rr404/talk-to-copilot.git"
+  },
+  "homepage": "https://github.com/Errr0rr404/talk-to-copilot#readme",
+  "bugs": {
+    "url": "https://github.com/Errr0rr404/talk-to-copilot/issues"
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
