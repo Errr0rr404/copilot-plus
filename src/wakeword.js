@@ -8,6 +8,21 @@ const os = require('os');
 
 const IS_WIN = os.platform() === 'win32';
 
+/** Levenshtein edit distance between two strings. */
+function _editDistance(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
 /**
  * WakeWordListener — always-on keyword detection using whisper.cpp + VAD.
  *
@@ -98,13 +113,15 @@ class WakeWordListener extends EventEmitter {
   _transcribe(audioFile) {
     // Use the tiny model if available for lower latency, else fall back to configured model
     const tinyModel = this._findTinyModel() || this.config.modelPath;
+    const phrase = ((this.config.wakeWord && this.config.wakeWord.phrase) || 'hey copilot').trim();
 
     return new Promise((resolve) => {
       execFile('whisper-cli', [
         '-m', tinyModel,
         '-f', audioFile,
-        '-np',            // no extra prints
-        '-nt',            // no timestamps
+        '--prompt', phrase,  // bias transcription toward the wake phrase words
+        '-np',               // no extra prints
+        '-nt',               // no timestamps
       ], { timeout: 10000 }, (err, stdout) => {
         if (err) { resolve(''); return; }
         const text = stdout
@@ -124,10 +141,18 @@ class WakeWordListener extends EventEmitter {
     const phrase = ((this.config.wakeWord && this.config.wakeWord.phrase) || 'hey copilot')
       .toLowerCase()
       .trim();
-    // Strip punctuation from transcription before comparing so that whisper output
-    // like "Hey, Copilot." or "Hey Copilot!" still matches the wake phrase.
+    // Strip punctuation so "Hey, Copilot." still matches.
     const normalized = text.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
-    return normalized.includes(phrase);
+    if (normalized.includes(phrase)) return true;
+
+    // Fuzzy fallback: every word in the phrase must appear close enough
+    // (within edit distance ~25% of word length) in the transcription.
+    // Handles mishearings like "coballot" → "copilot".
+    const phraseWords = phrase.split(/\s+/);
+    const textWords = normalized.split(/\s+/);
+    return phraseWords.every(pw =>
+      textWords.some(tw => _editDistance(pw, tw) <= Math.floor(pw.length / 4))
+    );
   }
 
   _findTinyModel() {
