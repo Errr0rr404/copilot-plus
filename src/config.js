@@ -162,7 +162,7 @@ function defaultConfig() {
     firstRunComplete: false,
     macros: { 1: '', 2: '', 3: '', 4: '', 5: '', 6: '', 7: '', 8: '', 9: '' },
     dictation: { enabled: false, chunkSeconds: 4 },
-    wakeWord: { enabled: false, accessKey: '', keywordPath: '', sensitivity: 0.5 },
+    wakeWord: { enabled: false, phrase: 'hey copilot', chunkSeconds: 2 },
   };
 }
 

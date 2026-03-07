@@ -1,118 +1,141 @@
 'use strict';
 
 const EventEmitter = require('events');
+const { spawn, execFile } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+const IS_WIN = os.platform() === 'win32';
 
 /**
- * WakeWordListener — always-on keyword detection using Picovoice Porcupine.
+ * WakeWordListener — always-on keyword detection using whisper.cpp + VAD.
  *
- * Listens for a wake word and emits 'detected' when heard.
- * Uses @picovoice/porcupine-node + @picovoice/pvrecorder-node.
- * Dependencies are dynamically loaded so the app doesn't crash if they're
- * not installed (wake word just won't be available).
+ * Records short audio chunks continuously. When VAD detects speech,
+ * whisper transcribes it and checks if the transcription contains the
+ * configured wake phrase. No extra dependencies — uses the same
+ * whisper-cli and ffmpeg already required by voice recording.
  *
  * Events:
- *   'detected' ()      — wake word heard
+ *   'detected' ()      — wake phrase heard
  *   'error'    (Error)  — non-fatal error
- *   'ready'    ()       — listener initialised and running
  */
 class WakeWordListener extends EventEmitter {
   constructor(config) {
     super();
     this.config = config;
-    this._porcupine = null;
-    this._recorder = null;
     this._listening = false;
-    this._processInterval = null;
+    this._ffmpeg = null;
+    this._loopTimer = null;
+    this._busy = false;
   }
 
   get isListening() { return this._listening; }
 
-  /**
-   * Start listening for the wake word.
-   * Throws if Porcupine deps are not installed.
-   */
   async start() {
     if (this._listening) return;
-
-    let Porcupine, BuiltinKeyword, getBuiltinKeywordPath, PvRecorder;
-    try {
-      ({ Porcupine, BuiltinKeyword, getBuiltinKeywordPath } = require('@picovoice/porcupine-node'));
-      ({ PvRecorder } = require('@picovoice/pvrecorder-node'));
-    } catch {
-      throw new Error(
-        'Wake word requires @picovoice/porcupine-node and @picovoice/pvrecorder-node.\n' +
-        'Install: npm install -g @picovoice/porcupine-node @picovoice/pvrecorder-node'
-      );
+    if (!this.config.audioDevice) {
+      throw new Error('No audio device configured. Run: copilot+ --setup');
     }
-
-    const accessKey = this.config.wakeWord && this.config.wakeWord.accessKey;
-    if (!accessKey) {
-      throw new Error('Wake word requires a Picovoice AccessKey. Get one free at https://console.picovoice.ai/');
+    if (!this.config.modelPath || !fs.existsSync(this.config.modelPath)) {
+      throw new Error('No whisper model found. Run: copilot+ --setup');
     }
-
-    const keywordPath = this.config.wakeWord && this.config.wakeWord.keywordPath;
-    const sensitivity = (this.config.wakeWord && this.config.wakeWord.sensitivity) || 0.5;
-
-    try {
-      if (keywordPath) {
-        // Custom keyword (.ppn file, e.g. "hey copilot")
-        this._porcupine = new Porcupine(accessKey, [keywordPath], [sensitivity]);
-      } else {
-        // Built-in "COMPUTER" keyword as fallback
-        const builtinPath = getBuiltinKeywordPath(BuiltinKeyword.COMPUTER);
-        this._porcupine = new Porcupine(accessKey, [builtinPath], [sensitivity]);
-      }
-    } catch (err) {
-      throw new Error(`Porcupine init failed: ${err.message}`);
-    }
-
-    try {
-      this._recorder = new PvRecorder(this._porcupine.frameLength);
-      this._recorder.start();
-    } catch (err) {
-      this._porcupine.release();
-      this._porcupine = null;
-      throw new Error(`Audio recorder init failed: ${err.message}`);
-    }
-
     this._listening = true;
-    this.emit('ready');
-    this._poll();
+    this._scheduleChunk();
   }
 
   stop() {
     this._listening = false;
-    if (this._processInterval) {
-      clearTimeout(this._processInterval);
-      this._processInterval = null;
-    }
-    if (this._recorder) {
-      try { this._recorder.stop(); } catch {}
-      this._recorder.release();
-      this._recorder = null;
-    }
-    if (this._porcupine) {
-      this._porcupine.release();
-      this._porcupine = null;
-    }
+    if (this._loopTimer) { clearTimeout(this._loopTimer); this._loopTimer = null; }
+    if (this._ffmpeg) { try { this._ffmpeg.kill('SIGTERM'); } catch {} this._ffmpeg = null; }
   }
 
-  /** Continuously read audio frames and check for keyword. */
-  _poll() {
+  _scheduleChunk() {
     if (!this._listening) return;
+    // Stagger slightly so we don't flood on fast machines
+    this._loopTimer = setTimeout(() => this._runChunk(), 100);
+  }
+
+  async _runChunk() {
+    if (!this._listening || this._busy) { this._scheduleChunk(); return; }
+    this._busy = true;
+
+    const chunkSecs = this.config.wakeWord.chunkSeconds || 2;
+    const audioFile = path.join(os.tmpdir(), `copilot-wake-${Date.now()}.wav`);
 
     try {
-      const frames = this._recorder.readSync();
-      const keywordIndex = this._porcupine.process(frames);
-      if (keywordIndex >= 0) {
+      await this._record(audioFile, chunkSecs);
+      if (!this._listening) return;
+      if (!fs.existsSync(audioFile)) return;
+
+      const text = await this._transcribe(audioFile);
+      if (this._matchesWakePhrase(text)) {
         this.emit('detected');
       }
     } catch (err) {
-      this.emit('error', err);
+      if (this._listening) this.emit('error', err);
+    } finally {
+      fs.unlink(audioFile, () => {});
+      this._busy = false;
+      this._scheduleChunk();
     }
+  }
 
-    // Use setImmediate to avoid blocking the event loop
-    this._processInterval = setTimeout(() => this._poll(), 10);
+  _record(audioFile, seconds) {
+    return new Promise((resolve, reject) => {
+      const args = IS_WIN
+        ? ['-f', 'dshow', '-i', `audio=${this.config.audioDevice}`, '-t', String(seconds), '-ar', '16000', '-ac', '1', '-y', audioFile]
+        : ['-f', 'avfoundation', '-i', this.config.audioDevice, '-t', String(seconds), '-ar', '16000', '-ac', '1', '-y', audioFile];
+
+      const proc = spawn('ffmpeg', args, { stdio: ['pipe', 'ignore', 'ignore'] });
+      this._ffmpeg = proc;
+      proc.on('exit', () => { this._ffmpeg = null; resolve(); });
+      proc.on('error', reject);
+    });
+  }
+
+  _transcribe(audioFile) {
+    // Use the tiny model if available for lower latency, else fall back to configured model
+    const tinyModel = this._findTinyModel() || this.config.modelPath;
+
+    return new Promise((resolve) => {
+      execFile('whisper-cli', [
+        '-m', tinyModel,
+        '-f', audioFile,
+        '--vad',          // skip silent segments
+        '-np',            // no extra prints
+        '-nt',            // no timestamps
+      ], { timeout: 10000 }, (err, stdout) => {
+        if (err) { resolve(''); return; }
+        const text = stdout
+          .split('\n')
+          .map(l => l.trim())
+          .filter(Boolean)
+          .filter(l => !l.startsWith('[') || !l.endsWith(']'))
+          .join(' ')
+          .toLowerCase();
+        resolve(text);
+      });
+    });
+  }
+
+  _matchesWakePhrase(text) {
+    if (!text) return false;
+    const phrase = ((this.config.wakeWord && this.config.wakeWord.phrase) || 'hey copilot')
+      .toLowerCase()
+      .trim();
+    // Allow partial matches — "hey copilot" matches "hey copilot can you..."
+    return text.includes(phrase);
+  }
+
+  _findTinyModel() {
+    const candidates = [
+      path.join(os.homedir(), '.copilot', 'models', 'ggml-tiny.en.bin'),
+      path.join(os.homedir(), '.copilot', 'models', 'ggml-base.en.bin'),
+      '/opt/homebrew/share/whisper.cpp/models/ggml-tiny.en.bin',
+      '/usr/local/share/whisper.cpp/models/ggml-tiny.en.bin',
+    ];
+    return candidates.find(p => fs.existsSync(p)) || null;
   }
 }
 

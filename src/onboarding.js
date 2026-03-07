@@ -28,32 +28,16 @@ async function runOnboarding(cfg) {
   }
 
   // --- Wake word ---
-  console.log('🗣️   Wake Word — say a keyword to start voice recording hands-free.');
-  console.log('    Uses Picovoice Porcupine (low CPU). Requires a free AccessKey.');
-  console.log('    Get one at: https://console.picovoice.ai/\n');
+  console.log('🗣️   Wake Word — say a phrase to start voice recording hands-free.');
+  console.log('    Uses whisper.cpp (already installed) — no extra dependencies or accounts needed.');
+  console.log('    Records short 2-second chunks and listens for your chosen phrase.\n');
   const wakeAnswer = (await ask('Enable wake word activation? [y/N] ')).trim().toLowerCase();
   cfg.wakeWord.enabled = wakeAnswer === 'y' || wakeAnswer === 'yes';
   if (cfg.wakeWord.enabled) {
-    if (!cfg.wakeWord.accessKey) {
-      const key = (await ask('Enter your Picovoice AccessKey: ')).trim();
-      if (key) {
-        cfg.wakeWord.accessKey = key;
-      } else {
-        console.log('⚠️   No AccessKey provided. Wake word will be disabled until you add one.\n');
-        cfg.wakeWord.enabled = false;
-      }
-    }
-    if (cfg.wakeWord.enabled) {
-      console.log('    Default keyword: "computer". To use "hey copilot", train a custom keyword at:');
-      console.log('    https://console.picovoice.ai/ and set wakeWord.keywordPath in config.\n');
-      const customPath = (await ask('Custom keyword file path (Enter to skip): ')).trim();
-      if (customPath) {
-        cfg.wakeWord.keywordPath = customPath;
-        console.log(`✅  Wake word enabled with custom keyword: ${customPath}\n`);
-      } else {
-        console.log('✅  Wake word enabled with default keyword: "computer"\n');
-      }
-    }
+    const defaultPhrase = cfg.wakeWord.phrase || 'hey copilot';
+    const phrase = (await ask(`Wake phrase (Enter to use "${defaultPhrase}"): `)).trim();
+    cfg.wakeWord.phrase = phrase || defaultPhrase;
+    console.log(`✅  Wake word enabled. Say "${cfg.wakeWord.phrase}" to start recording.\n`);
   } else {
     console.log('    Wake word disabled. You can enable it later.\n');
   }
