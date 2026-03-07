@@ -25,6 +25,14 @@ const CTRL_P = '\x10';
 const CTRL_C = '\x03';
 const CTRL_K = '\x0b';
 
+// Ctrl+Shift+1–4 in CSI u encoding (modifier 6 = Ctrl+Shift), sent by kitty/WezTerm
+const MODEL_SLOT_CSI_U_RE = /^\x1b\[(\d+);6u$/;
+
+// Option+Shift+1–4 on macOS Terminal.app / iTerm2 with "Use Option as Meta Key"
+// Shift+1=!  Shift+2=@  Shift+3=#  Shift+4=$  → Meta prefix makes \x1b! etc.
+const MODEL_SLOT_META_RE = /^\x1b([!@#$])$/;
+const META_SHIFTED_MAP = { '!': 1, '@': 2, '#': 3, '$': 4 };
+
 function resolveBin(name) {
   try {
     const cmd = IS_WIN ? 'where' : 'which';
@@ -113,6 +121,26 @@ class CopilotWrapper {
       return;
     }
 
+    // Ctrl+Shift+1–4 (CSI u modifier 6): switch workhorse model slots
+    const modelCsi = MODEL_SLOT_CSI_U_RE.exec(key);
+    if (modelCsi) {
+      const code = parseInt(modelCsi[1], 10);
+      if (code >= 49 && code <= 52) {
+        this._switchModel(code - 48);
+        return;
+      }
+    }
+
+    // Option+Shift+1–4 (macOS Terminal.app / iTerm2 with "Use Option as Meta Key")
+    const modelMeta = MODEL_SLOT_META_RE.exec(key);
+    if (modelMeta) {
+      const slot = META_SHIFTED_MAP[modelMeta[1]];
+      if (slot) {
+        this._switchModel(slot);
+        return;
+      }
+    }
+
     const macroSlot = this.macros.parseSlot(key);
     if (macroSlot !== null) {
       const prompt = this.macros.get(macroSlot);
@@ -167,6 +195,20 @@ class CopilotWrapper {
       { id: 'voice-activation-toggle', label: vaLabel, hint: 'toggle' },
     ];
 
+    const workhorseModels = this.cfg.workhorseModels || {};
+    for (let i = 1; i <= 4; i++) {
+      const model = workhorseModels[i] || '';
+      const preview = model || '(not set — press Enter to configure)';
+      actions.push({
+        id: `model-${i}`,
+        label: `🤖  Workhorse ${i}: ${preview}`,
+        hint: `Opt+⇧${i}`,
+        editable: true,
+        editTitle: `Workhorse Model ${i}`,
+        value: model,
+      });
+    }
+
     for (let i = 1; i <= 9; i++) {
       const prompt = this.macros.get(i);
       const preview = prompt
@@ -188,6 +230,20 @@ class CopilotWrapper {
       if (!result) return;
 
       if (typeof result === 'object') {
+        if (result.id.startsWith('model-')) {
+          const slot = parseInt(result.id.split('-')[1], 10);
+          this.cfg.workhorseModels = Object.assign({}, this.cfg.workhorseModels, { [slot]: result.value });
+          config.save(this.cfg);
+          this._notify(
+            `🤖 Workhorse ${slot} saved`,
+            result.value || '(cleared)'
+          );
+          if (result.run && result.value) {
+            this._switchModel(slot);
+          }
+          return;
+        }
+
         const slot = parseInt(result.id.split('-')[1], 10);
         this.macros.set(slot, result.value);
         this.cfg.macros = Object.assign({}, this.cfg.macros, { [slot]: result.value });
@@ -238,13 +294,27 @@ class CopilotWrapper {
         this._notify('⚙️ Preferences', 'Exit and run: copilot+ --preferences');
         break;
       default:
-        if (actionId.startsWith('macro-')) {
+        if (actionId.startsWith('model-')) {
+          const slot = parseInt(actionId.split('-')[1], 10);
+          this._switchModel(slot);
+        } else if (actionId.startsWith('macro-')) {
           const slot = parseInt(actionId.split('-')[1], 10);
           const prompt = this.macros.get(slot);
           if (prompt) this._shell.write(prompt + (this.cfg.autoSubmit ? '\r' : ''));
         }
         break;
     }
+  }
+
+  _switchModel(slot) {
+    const model = this.cfg.workhorseModels && this.cfg.workhorseModels[slot];
+    if (!model) {
+      this._notify(`🤖 Workhorse ${slot} not set`, 'Press Ctrl+K to configure model slots');
+      return;
+    }
+    // Ctrl+U clears the current input line before injecting the /model command
+    this._shell.write(`\x15/model ${model}\r`);
+    this._notify(`🤖 Switched to Workhorse ${slot}`, model);
   }
 
   _startVoice() {

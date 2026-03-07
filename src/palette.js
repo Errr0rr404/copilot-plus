@@ -306,11 +306,11 @@ class CommandPalette {
     const startRow = 2;
     const startCol = Math.max(1, Math.floor((cols - w) / 2));
 
-    const slotNum = this._editItem.id.replace('macro-', '');
     const lines = [];
 
-    // Header
-    const title = ` Edit Macro ${slotNum} `;
+    // Header — use item's editTitle if provided, else fall back to "Edit Macro N"
+    const rawTitle = this._editItem.editTitle || `Edit Macro ${this._editItem.id.replace('macro-', '')}`;
+    const title = ` ${rawTitle} `;
     const padLeft = Math.floor((inner - title.length) / 2);
     const padRight = Math.max(0, inner - title.length - padLeft);
     lines.push(`${TL}${H.repeat(Math.max(0, padLeft))}${title}${H.repeat(padRight)}${TR}`);

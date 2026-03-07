@@ -1,6 +1,6 @@
 # copilot-plus
 
-> Talk to [GitHub Copilot CLI](https://docs.github.com/copilot/concepts/agents/about-copilot-cli) with your voice — and share screenshots — without leaving your terminal.
+> Talk to [GitHub Copilot CLI](https://docs.github.com/copilot/concepts/agents/about-copilot-cli) with your voice — share screenshots — and switch AI models instantly — without leaving your terminal.
 
 `copilot+` is a drop-in replacement for the `copilot` command. It wraps Copilot CLI transparently and adds powerful input enhancements:
 
@@ -9,7 +9,9 @@
 | **Ctrl+R** | Start / stop voice recording → transcription is typed into your prompt |
 | **Ctrl+P** | Screenshot picker → file path is injected as `@/path/screenshot.png` |
 | **Ctrl+K** | Open command palette — access all features from a searchable menu |
-| **Option+1–9** *(macOS)* | Execute a prompt macro — requires "Use Option as Meta Key" in Terminal settings |
+| **Option+Shift+1–4** *(macOS Terminal.app)* | Switch to workhorse model slot 1–4 — requires "Use Option as Meta Key" |
+| **Ctrl+Shift+1–4** *(kitty/WezTerm/Windows Terminal)* | Switch to workhorse model slot 1–4 on CSI u–capable terminals |
+| **Option+1–9** *(macOS Terminal.app)* | Execute a prompt macro — requires "Use Option as Meta Key" |
 | **Ctrl+1–9** *(kitty/WezTerm/Windows Terminal)* | Execute a prompt macro on CSI u–capable terminals |
 
 Everything else — all Copilot features, slash commands, modes — works exactly as normal.
@@ -149,15 +151,50 @@ Press **Ctrl+K** to open the command palette — a searchable overlay listing ev
 - 🎙 Voice Recording
 - 📸 Screenshot
 - 🗣️ Voice Activation (toggle on/off)
+- 🤖 Workhorse Models 1–4 (switch or configure model slots)
 - ⌨️ Macros 1–9 (execute or edit inline)
 - ⚙️ Open Preferences
 
 **Navigation:** `↑↓` to move, type to filter, **Enter** to select, **Esc** to close.
 
-**Editing macros from the palette:** Navigate to any macro entry and press **Enter** to open an inline editor. Edit the text freely, then:
-- **Enter** — save and immediately run the macro
-- **Tab** — save without running
+**Editing items from the palette:** Navigate to any workhorse model or macro entry and press **Enter** to open an inline editor. Then:
+- **Enter** — save and immediately activate (switch model / run macro)
+- **Tab** — save without activating
 - **Esc** — go back without saving
+
+---
+
+## Workhorse Model Slots
+
+Assign up to 4 AI models to slots so you can switch between them instantly with a single hotkey — no more typing `/model` each time.
+
+### Setup
+
+The easiest way: open the command palette (**Ctrl+K**), navigate to a **Workhorse** entry, press **Enter**, type the model name (e.g. `claude-sonnet-4.6`), and press **Enter** to save and switch immediately.
+
+You can also edit `~/.copilot/copilot-plus.json` directly:
+
+```json
+{
+  "workhorseModels": {
+    "1": "claude-sonnet-4.6",
+    "2": "claude-opus-4.5",
+    "3": "gpt-4.1",
+    "4": "o3"
+  }
+}
+```
+
+### Switching models
+
+| Terminal | Hotkey |
+|----------|--------|
+| **macOS Terminal.app** | **Option+Shift+1–4** — requires "Use Option as Meta Key" (same as macros) |
+| **kitty / WezTerm** | **Ctrl+Shift+1–4** — works natively |
+| **Windows Terminal** | **Ctrl+Shift+1–4** — works natively |
+| **Any terminal** | **Ctrl+K** → navigate to a Workhorse entry → **Enter** |
+
+Switching clears the current input line and sends `/model <name>` to Copilot CLI, then shows a macOS/Windows notification confirming the switch.
 
 ---
 
@@ -234,6 +271,12 @@ Settings are stored at `~/.copilot/copilot-plus.json` (created automatically on 
   "audioDevice": ":2",
   "autoSubmit": false,
   "firstRunComplete": true,
+  "workhorseModels": {
+    "1": "claude-sonnet-4.6",
+    "2": "claude-opus-4.5",
+    "3": "gpt-4.1",
+    "4": "o3"
+  },
   "macros": {
     "1": "Write unit tests for this code",
     "2": "Explain this code step by step"
@@ -249,29 +292,13 @@ Settings are stored at `~/.copilot/copilot-plus.json` (created automatically on 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `modelPath` | auto-detected | Path to your whisper `.bin` model file. Auto-heals if the file moves. |
-| `audioDevice` | **auto-detected** | ffmpeg audio input. Set interactively via `copilot+ --setup`, or override manually. macOS: index like `":2"`. Windows: device name like `"Microphone (Realtek Audio)"`. |
-| `autoSubmit` | `false` | `true` = automatically press Enter after transcription |
-| `firstRunComplete` | `false` | Set to `true` after onboarding wizard completes |
-| `macros` | all empty | Prompt macros. Keys are `"1"` through `"9"`. Edit via command palette (Ctrl+K) or `--preferences`. |
+| `audioDevice` | auto-detected | ffmpeg audio input device. Set interactively via `copilot+ --setup`. macOS: `":2"` index format. Windows: `"Microphone (Realtek Audio)"` name format. |
+| `autoSubmit` | `false` | `true` = automatically press Enter after voice transcription |
+| `workhorseModels` | all empty | AI model slots 1–4. Edit via Ctrl+K command palette or directly here. |
+| `macros` | all empty | Prompt macros, slots 1–9. Edit via Ctrl+K or `--preferences`. |
 | `wakeWord.enabled` | `false` | Enable voice activation (wake phrase detection) |
-| `wakeWord.phrase` | `"hey copilot"` | The phrase to listen for — any words work |
+| `wakeWord.phrase` | `"hey copilot"` | The phrase to listen for |
 | `wakeWord.chunkSeconds` | `2` | Audio chunk length for wake phrase scanning |
-
-### Finding your microphone
-
-`copilot+` auto-detects the best available microphone and skips virtual devices (Teams, Zoom, Soundflower, etc.). If the wrong mic is detected, find the correct one:
-
-**macOS:**
-```bash
-ffmpeg -f avfoundation -list_devices true -i "" 2>&1 | grep AVFoundation
-```
-The number in brackets (e.g. `[2]`) is the index — set `audioDevice` to `":2"`.
-
-**Windows:**
-```powershell
-ffmpeg -f dshow -list_devices true -i dummy 2>&1 | findstr audio
-```
-The device name in quotes (e.g. `"Microphone (Realtek Audio)"`) is the value to use for `audioDevice`.
 
 ### Available whisper models
 
@@ -301,20 +328,21 @@ Then update `modelPath` in `~/.copilot/copilot-plus.json`.
 │  copilot+ (PTY wrapper)                                            │
 │                                                                    │
 │  Your keystrokes ──► intercept hotkeys                             │
-│                      ├── Ctrl+R      → push-to-talk voice recording  │
-│                      ├── Ctrl+P      → screenshot picker              │
-│                      ├── Ctrl+K      → command palette overlay        │
-│                      ├── Option+1–9  → inject prompt macro (macOS)    │
-│                      ├── Ctrl+1–9   → inject prompt macro (CSI u)     │
-│                      │                                                │
-│                      ▼                                                │
-│         ┌─────────────┬──────────────┬───────────────┐               │
-│         │ ffmpeg mic   │ screencapture │ whisper+VAD   │              │
-│         │ + whisper-cli│ / Snip&Sketch │ (voice activ) │              │
+│                      ├── Ctrl+R         → push-to-talk recording   │
+│                      ├── Ctrl+P         → screenshot picker         │
+│                      ├── Ctrl+K         → command palette overlay   │
+│                      ├── Opt+⇧1–4       → switch workhorse model    │
+│                      ├── Ctrl+⇧1–4      → switch workhorse model    │
+│                      ├── Option+1–9     → inject macro (macOS)      │
+│                      ├── Ctrl+1–9       → inject macro (CSI u)      │
+│                      ▼                                              │
+│         ┌─────────────┬──────────────┬───────────────┐             │
+│         │ ffmpeg mic   │ screencapture │ whisper+VAD   │            │
+│         │ + whisper-cli│ / Snip&Sketch │ (voice activ) │            │
 │         └──────┬───────┴──────┬───────┴───────┬───────┘            │
 │                └──────────────┴───────────────┘                    │
 │                              ▼                                     │
-│                   inject text / @filepath / macro                   │
+│                   inject text / @filepath / /model cmd             │
 │                              │                                     │
 │  copilot ◄───────────────────┘                                     │
 │  (all other keystrokes pass through unchanged)                     │
@@ -378,6 +406,12 @@ mkdir -p ~/.copilot/models
 curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin" \
   -o ~/.copilot/models/ggml-tiny.en.bin
 ```
+
+**Option+Shift+1–4 model slots / Option+1–9 macros don't work (macOS Apple Terminal)**  
+Open Terminal → Settings → Profiles → Keyboard → check **"Use Option as Meta Key"**.
+
+**Model slot hotkey does nothing (kitty/WezTerm/Windows Terminal)**  
+Ensure your terminal is configured to send CSI u key sequences. In kitty this is on by default. In WezTerm, `enable_kitty_keyboard = true` must be set. In Windows Terminal, enable **"Input: Terminal Input Encoding"** → `application/vnd.ms-terminal.keyboard.v2` in settings.
 
 **Option+1–9 macros don't work (macOS Apple Terminal)**  
 Open Terminal → Settings → Profiles → Keyboard → check **"Use Option as Meta Key"**.

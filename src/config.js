@@ -162,6 +162,7 @@ function defaultConfig() {
     firstRunComplete: false,
     macros: { 1: '', 2: '', 3: '', 4: '', 5: '', 6: '', 7: '', 8: '', 9: '' },
     wakeWord: { enabled: false, phrase: 'hey copilot', chunkSeconds: 2 },
+    workhorseModels: { 1: '', 2: '', 3: '', 4: '' },
   };
 }
 
@@ -186,6 +187,7 @@ function load() {
   const merged = Object.assign({}, defaults, fileConfig, { audioDevice, modelPath });
   merged.macros = Object.assign({}, defaults.macros, fileConfig.macros);
   merged.wakeWord = Object.assign({}, defaults.wakeWord, fileConfig.wakeWord);
+  merged.workhorseModels = Object.assign({}, defaults.workhorseModels, fileConfig.workhorseModels);
 
   return merged;
 }
