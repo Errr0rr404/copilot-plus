@@ -29,9 +29,20 @@ Everything else — all Copilot features, slash commands, modes — works exactl
 
 ## Installation
 
+### Option A — npm (macOS + Windows)
+
 ```bash
 npm install -g copilot-plus
 ```
+
+### Option B — Homebrew (macOS only)
+
+```bash
+brew tap Errr0rr404/copilot-plus
+brew install copilot-plus
+```
+
+---
 
 ### macOS — install speech dependencies
 
@@ -54,13 +65,13 @@ curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.
 winget install Gyan.FFmpeg
 ```
 
-**2. Install whisper-cli:**
+**2. Install whisper-cli:**  <a name="windows-whisper-setup"></a>
 - Download the latest `whisper-cli.exe` from [github.com/ggerganov/whisper.cpp/releases](https://github.com/ggerganov/whisper.cpp/releases)
 - Place it somewhere on your PATH (e.g. `C:\Windows\System32\` or add the folder to PATH)
 
 **3. Download the speech model:**
 ```powershell
-mkdir "$env:USERPROFILE\.copilot\models"
+mkdir "$env:USERPROFILE\.copilot\models" -Force
 curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin" `
   -o "$env:USERPROFILE\.copilot\models\ggml-base.en.bin"
 ```
@@ -87,12 +98,12 @@ That's it. You're now inside Copilot CLI with voice and screenshot support activ
 
 ## Using Voice Input
 
-1. **Press `Ctrl+R`** to start recording.
-   A macOS notification appears and your terminal title changes to `🎙 Recording…`
+1. **Press `Ctrl+R`** to start recording.  
+   A system notification appears and your terminal title changes to `🎙 Recording…`
 
 2. **Speak your prompt** naturally — e.g. _"refactor this function to use async await"_
 
-3. **Press `Ctrl+R` again** to stop.
+3. **Press `Ctrl+R` again** to stop.  
    Transcription runs locally (`⏳ Transcribing…`) — no audio ever leaves your machine.
 
 4. **Your words appear as text** in the Copilot prompt. Review and edit if needed, then press **Enter** to send.
@@ -103,13 +114,11 @@ That's it. You're now inside Copilot CLI with voice and screenshot support activ
 
 ## Using Screenshots
 
-1. **Press `Ctrl+P`** — the macOS screenshot overlay opens (same UI as `⌘⇧4`).
+**macOS:** Press `Ctrl+P` — the interactive screenshot overlay opens (same UI as `⌘⇧4`). Click and drag to select any area. The file path is injected into your prompt as `@/tmp/copilot-screenshots/screenshot-<timestamp>.png`.
 
-2. **Click and drag** to select any area of your screen — a browser error, a UI bug, a diagram, anything.
+**Windows:** Press `Ctrl+P` — the Snip & Sketch overlay opens (same as `Win+Shift+S`). Draw a selection; the file path is injected automatically when you complete the snip.
 
-3. **The file path is injected** into your prompt as `@/tmp/copilot-screenshots/screenshot-<timestamp>.png`.
-
-4. **Add context** if you want (e.g. _"what's wrong with this?"_), then press **Enter**.
+Add context if you want (e.g. _"what's wrong with this?"_), then press **Enter**.
 
 ---
 
@@ -127,12 +136,12 @@ copilot+ --help
 
 ## Configuration
 
-Settings are stored at `~/.copilot/copilot-plus.json` and created automatically on first run.
+Settings are stored at `~/.copilot/copilot-plus.json` (created automatically on first run).
 
 ```json
 {
   "modelPath": "/opt/homebrew/share/whisper.cpp/models/ggml-base.en.bin",
-  "audioDevice": ":0",
+  "audioDevice": ":2",
   "autoSubmit": false
 }
 ```
@@ -140,16 +149,24 @@ Settings are stored at `~/.copilot/copilot-plus.json` and created automatically 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `modelPath` | auto-detected | Path to your whisper `.bin` model file |
-| `audioDevice` | `:0` | ffmpeg avfoundation audio input index |
+| `audioDevice` | **auto-detected** | ffmpeg audio input. macOS: index like `":2"`. Windows: device name like `"Microphone (Realtek Audio)"`. Override here if the wrong mic is used. |
 | `autoSubmit` | `false` | `true` = automatically press Enter after transcription |
 
-### Finding your microphone index
+### Finding your microphone
 
+`copilot+` auto-detects the best available microphone and skips virtual devices (Teams, Zoom, Soundflower, etc.). If the wrong mic is detected, find the correct one:
+
+**macOS:**
 ```bash
 ffmpeg -f avfoundation -list_devices true -i "" 2>&1 | grep AVFoundation
 ```
+The number in brackets (e.g. `[2]`) is the index — set `audioDevice` to `":2"`.
 
-Look for your microphone in the output. The number in brackets (e.g. `[2]`) is the index — set `audioDevice` to `":2"`.
+**Windows:**
+```powershell
+ffmpeg -f dshow -list_devices true -i dummy 2>&1 | findstr audio
+```
+The device name in quotes (e.g. `"Microphone (Realtek Audio)"`) is the value to use for `audioDevice`.
 
 ### Available whisper models
 
@@ -160,7 +177,12 @@ Look for your microphone in the output. The number in brackets (e.g. `[2]`) is t
 | `small.en` | 466 MB | ~3 s | Best for most |
 
 ```bash
+# macOS
 whisper-cpp-download-ggml-model small.en
+
+# Windows — download directly and update modelPath in config
+curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin" `
+  -o "$env:USERPROFILE\.copilot\models\ggml-small.en.bin"
 ```
 
 Then update `modelPath` in `~/.copilot/copilot-plus.json`.
@@ -171,20 +193,20 @@ Then update `modelPath` in `~/.copilot/copilot-plus.json`.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  copilot+ (PTY wrapper)                                        │
-│                                                           │
+│  copilot+ (PTY wrapper)                                  │
+│                                                          │
 │  Your keystrokes ──► intercept Ctrl+R / Ctrl+P           │
-│                            │               │              │
-│                            ▼               ▼              │
-│                      ffmpeg mic      screencapture -i     │
-│                      + whisper-cli   (Win: Snip & Sketch)  │
-│                            │               │              │
-│                            └───────┬───────┘              │
-│                                    ▼                      │
-│                         inject text / @filepath           │
-│                                    │                      │
-│  copilot ◄─────────────────────────┘                     │
-│  (all other keystrokes pass through unchanged)            │
+│                            │               │             │
+│                            ▼               ▼             │
+│                      ffmpeg mic      screencapture -i    │
+│                      + whisper-cli   (Win: Snip & Sketch) │
+│                            │               │             │
+│                            └───────┬───────┘             │
+│                                    ▼                     │
+│                         inject text / @filepath          │
+│                                    │                     │
+│  copilot ◄─────────────────────────┘                    │
+│  (all other keystrokes pass through unchanged)           │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -194,10 +216,10 @@ Transcription is 100% local — whisper.cpp runs on your machine, nothing is sen
 
 ## Troubleshooting
 
-**`posix_spawnp failed` on first run**
+**`posix_spawnp failed` on first run**  
 Run `npm install -g copilot-plus` again — the postinstall script will fix the permissions automatically.
 
-**Microphone not being captured / transcription is always the same word**
+**Microphone not being captured / transcription is always the same word**  
 Your `audioDevice` is pointing to the wrong input (e.g. a virtual audio device).
 
 *macOS* — list devices:
@@ -213,11 +235,11 @@ ffmpeg -f dshow -list_devices true -i dummy 2>&1 | findstr audio
 Set `audioDevice` in `~/.copilot/copilot-plus.json` to the correct device  
 (macOS: `":2"` index format · Windows: `"Microphone (Realtek Audio)"` name format)
 
-**`Error: could not open input device` (macOS)**
-Grant microphone access to your terminal:
+**`Error: could not open input device` (macOS)**  
+Grant microphone access to your terminal:  
 *System Settings → Privacy & Security → Microphone → enable your terminal app*
 
-**`Error: could not open input device` (Windows)**
+**`Error: could not open input device` (Windows)**  
 Go to *Settings → Privacy & Security → Microphone* and enable microphone access for your terminal / Node.js.
 
 **`No whisper model found`**
@@ -234,13 +256,13 @@ curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.
 ```
 Then run `copilot+ --setup` to confirm it's detected.
 
-**Transcription is inaccurate**
+**Transcription is inaccurate**  
 Switch to a larger model (`small.en` instead of `base.en`) and update `modelPath` in `~/.copilot/copilot-plus.json`.
 
-**Screenshot doesn't attach (macOS)**
+**Screenshot doesn't attach (macOS)**  
 *System Settings → Privacy & Security → Screen Recording → enable your terminal app*
 
-**Screenshot doesn't attach (Windows)**
+**Screenshot doesn't attach (Windows)**  
 Make sure you drew a selection in the Snip & Sketch overlay — pressing Escape cancels without saving.
 
 ---

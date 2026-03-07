@@ -3,8 +3,13 @@
 
 const { execFile } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const cfg = require('../src/config');
 const CopilotWrapper = require('../src/wrapper');
+
+const IS_WIN = os.platform() === 'win32';
+// `which` on Unix, `where` on Windows
+const WHICH = IS_WIN ? 'where' : 'which';
 
 // ─── Setup mode ────────────────────────────────────────────────────────────────
 if (process.argv.includes('--setup')) {
@@ -29,7 +34,7 @@ function runSetup() {
   let allGood = true;
 
   // Check copilot
-  execFile('which', ['copilot'], (err) => {
+  execFile(WHICH, ['copilot'], (err) => {
     if (err) {
       console.log('❌  copilot   — not found in PATH');
       console.log('     Install: https://github.com/github/copilot-cli\n');
@@ -40,10 +45,14 @@ function runSetup() {
   });
 
   // Check ffmpeg
-  execFile('which', ['ffmpeg'], (err) => {
+  execFile(WHICH, ['ffmpeg'], (err) => {
     if (err) {
       console.log('❌  ffmpeg    — not found');
-      console.log('     Install: brew install ffmpeg\n');
+      if (IS_WIN) {
+        console.log('     Install: winget install Gyan.FFmpeg\n');
+      } else {
+        console.log('     Install: brew install ffmpeg\n');
+      }
       allGood = false;
     } else {
       console.log('✅  ffmpeg    — found');
@@ -51,11 +60,16 @@ function runSetup() {
   });
 
   // Check whisper-cli
-  execFile('which', ['whisper-cli'], (err) => {
+  execFile(WHICH, ['whisper-cli'], (err) => {
     if (err) {
       console.log('❌  whisper-cli — not found');
-      console.log('     Install: brew install whisper-cpp');
-      console.log('     Model:   whisper-cpp-download-ggml-model base.en\n');
+      if (IS_WIN) {
+        console.log('     Install: https://github.com/ggerganov/whisper.cpp/releases');
+        console.log('     Place whisper-cli.exe somewhere on your PATH\n');
+      } else {
+        console.log('     Install: brew install whisper-cpp');
+        console.log('     Model:   whisper-cpp-download-ggml-model base.en\n');
+      }
       allGood = false;
     } else {
       console.log('✅  whisper-cli — found');

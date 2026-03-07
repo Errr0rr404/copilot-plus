@@ -2,10 +2,13 @@
 
 const pty = require('node-pty');
 const { execFile, execFileSync } = require('child_process');
+const os = require('os');
 
 const config = require('./config');
 const VoiceRecorder = require('./voice');
 const screenshot = require('./screenshot');
+
+const IS_WIN = os.platform() === 'win32';
 
 // Byte sequences we intercept before forwarding to copilot
 const CTRL_R = '\x12';  // voice toggle
@@ -15,7 +18,9 @@ const CTRL_C = '\x03';
 /** Resolve the absolute path to a binary so node-pty's posix_spawnp can find it. */
 function resolveBin(name) {
   try {
-    return execFileSync('which', [name], { encoding: 'utf8' }).trim();
+    // `where` on Windows, `which` on Unix
+    const cmd = IS_WIN ? 'where' : 'which';
+    return execFileSync(cmd, [name], { encoding: 'utf8' }).trim().split('\n')[0];
   } catch {
     return name; // fall back to letting PATH sort it out
   }
@@ -168,10 +173,25 @@ class CopilotWrapper {
   }
 
   _notify(title, subtitle) {
-    execFile('osascript', [
-      '-e',
-      `display notification ${JSON.stringify(subtitle)} with title ${JSON.stringify(title)}`,
-    ]).unref();
+    if (IS_WIN) {
+      // PowerShell balloon toast — fire-and-forget, silently ignored on failure
+      const ps = `
+        Add-Type -AssemblyName System.Windows.Forms
+        $n = New-Object System.Windows.Forms.NotifyIcon
+        $n.Icon = [System.Drawing.SystemIcons]::Information
+        $n.Visible = $true
+        $n.ShowBalloonTip(3000, ${JSON.stringify(title)}, ${JSON.stringify(subtitle)}, [System.Windows.Forms.ToolTipIcon]::Info)
+        Start-Sleep -Milliseconds 3500
+        $n.Dispose()
+      `;
+      execFile('powershell', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', ps]).unref();
+    } else {
+      // macOS — osascript notification
+      execFile('osascript', [
+        '-e',
+        `display notification ${JSON.stringify(subtitle)} with title ${JSON.stringify(title)}`,
+      ]).unref();
+    }
   }
 }
 

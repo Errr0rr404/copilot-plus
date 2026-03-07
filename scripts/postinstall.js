@@ -9,6 +9,7 @@ const path = require('path');
 const os = require('os');
 
 if (os.platform() !== 'darwin' && os.platform() !== 'linux') process.exit(0);
+// Windows uses .node binaries (not spawn-helper) and handles permissions differently — no chmod needed.
 
 // Use require.resolve to find node-pty regardless of hoisting / install location
 let nodePtyDir;
