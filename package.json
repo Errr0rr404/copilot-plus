@@ -1,6 +1,6 @@
 {
   "name": "copilot-plus",
-  "version": "1.0.22",
+  "version": "1.0.23",
   "description": "Voice + screenshot input wrapper for GitHub Copilot CLI — use your mic and screen instead of typing",
   "bin": {
     "copilot+": "bin/copilot+"
@@ -39,8 +39,6 @@
     "url": "https://github.com/Errr0rr404/copilot-plus/issues"
   },
   "dependencies": {
-    "@picovoice/porcupine-node": "^3.0.0",
-    "@picovoice/pvrecorder-node": "^1.2.0",
     "node-pty": "^1.0.0"
   },
   "engines": {

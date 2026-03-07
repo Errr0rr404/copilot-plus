@@ -195,19 +195,19 @@ You can also set them during onboarding, via `copilot+ --preferences`, or by edi
 
 ## Voice Activation
 
-Say **"hey copilot"** (or any phrase you choose) to start recording hands-free — no accounts, no API keys, no extra installs.
+Say **"hey copilot"** or just **"copilot"** to start recording hands-free — no accounts, no API keys, no extra installs.
 
 **How it works:**
-1. Always listens for your wake phrase using whisper.cpp + VAD (near-zero CPU when silent)
+1. Always listens for your wake phrase using whisper.cpp (near-zero CPU when silent)
 2. Phrase detected → recording starts automatically
 3. You speak your prompt
 4. You pause → transcription runs locally → text is injected into copilot
-5. Returns to listening — ready for the next "hey copilot"
+5. Returns to listening — ready for the next trigger
 
 ### Setup
 
 Enable during first run or via `copilot+ --preferences`. Choose any wake phrase:
-- `"hey copilot"` (default)
+- `"hey copilot"` (default) — or just say `"copilot"` without the "hey", both work
 - `"ok computer"`, `"yo copilot"`, or any short distinctive phrase
 
 ---
@@ -371,7 +371,7 @@ Then run `copilot+ --setup` to confirm it's detected.
 Switch to a larger model (`small.en` instead of `base.en`) and update `modelPath` in `~/.copilot/copilot-plus.json`.
 
 **Wake word not triggering**  
-Try a shorter, more distinctive phrase (e.g. `"hey copilot"` works better than a single common word). You can also lower `wakeWord.chunkSeconds` to `3` so it checks more frequently, or download the `tiny.en` model for faster scanning:
+Try a shorter, more distinctive phrase (e.g. `"hey copilot"` works better than a single common word). You can increase `wakeWord.chunkSeconds` to `3` or `4` if the phrase gets cut off mid-recording, or download the `tiny.en` model for faster scanning:
 ```bash
 # macOS
 mkdir -p ~/.copilot/models
