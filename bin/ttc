@@ -77,7 +77,7 @@ function runSetup() {
     console.log('\n─────────────────────────────────────');
     console.log('Config:', cfg.CONFIG_PATH);
     console.log(`  modelPath:   ${config.modelPath || '(not set)'}`);
-    console.log(`  audioDevice: ${config.audioDevice}   (avfoundation mic index)`);
+    console.log(`  audioDevice: ${config.audioDevice}   (auto-detected — override in config if wrong)`);
     console.log(`  autoSubmit:  ${config.autoSubmit}   (auto-press Enter after transcription)`);
     console.log('\nHotkeys (inside talk):');
     console.log('  Ctrl+R  →  Start / stop voice recording');
