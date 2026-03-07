@@ -75,11 +75,11 @@ class CopilotWrapper {
       this._notify('⚠️ Dictation error', err.message.slice(0, 60));
     });
 
-    // Wake word: start voice recording when keyword is detected
+    // Wake word: auto-record until silence, then transcribe and inject
     if (this.cfg.wakeWord.enabled) {
       this.wakeWord.on('detected', () => {
-        this._notify('🗣️ Wake word detected', 'Starting voice recording…');
-        this._startVoice();
+        if (this._busy || this.voice.isRecording) return; // already recording
+        this._startVoiceAutoStop();
       });
       this.wakeWord.on('error', err => {
         this._notify('⚠️ Wake word error', err.message.slice(0, 60));
@@ -87,6 +87,12 @@ class CopilotWrapper {
       this.wakeWord.start().catch(err => {
         this._notify('⚠️ Wake word unavailable', err.message.slice(0, 60));
       });
+    }
+
+    // Dictation: auto-start if enabled in preferences
+    if (this.cfg.dictation && this.cfg.dictation.enabled) {
+      this.dictation.start();
+      this._setTitle('📝 Dictating…');
     }
 
     // Graceful shutdown
@@ -276,6 +282,48 @@ class CopilotWrapper {
       }
     }
   }
+
+  /** Called by wake word — records until silence, then auto-transcribes. */
+  _startVoiceAutoStop() {
+    if (this._busy) return;
+    this._busy = true;
+    if (this.wakeWord.isListening) this.wakeWord.stop();
+
+    this._setTitle('🎙 Listening… (speak now)');
+    this._notify('🗣️ Wake word detected', 'Speak your prompt — auto-stops on silence');
+
+    this.voice.startAutoStop()
+      .then(text => {
+        this._setTitle('copilot');
+        if (text) {
+          // Strip the wake phrase from the beginning if whisper captured it
+          const phrase = (this.cfg.wakeWord.phrase || '').toLowerCase().trim();
+          let cleaned = text;
+          if (phrase && cleaned.toLowerCase().startsWith(phrase)) {
+            cleaned = cleaned.slice(phrase.length).replace(/^[\s,.:]+/, '');
+          }
+          if (cleaned) {
+            this._shell.write(cleaned + (this.cfg.autoSubmit ? '\r' : ''));
+            this._notify('✅ Done', cleaned.length > 80 ? cleaned.slice(0, 77) + '…' : cleaned);
+          } else {
+            this._notify('⚠️ Nothing heard', 'Try speaking after the wake phrase');
+          }
+        } else {
+          this._notify('⚠️ Nothing heard', 'Try speaking after the wake phrase');
+        }
+      })
+      .catch(err => {
+        this._setTitle('copilot');
+        this._notify('❌ Transcription failed', err.message.slice(0, 80));
+      })
+      .finally(() => {
+        this._busy = false;
+        if (this.cfg.wakeWord.enabled && !this.wakeWord.isListening) {
+          this.wakeWord.start().catch(() => {});
+        }
+      });
+  }
+
 
   _stopVoice() {
     if (this._busy) return;

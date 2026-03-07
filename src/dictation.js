@@ -65,20 +65,37 @@ class DictationMode extends EventEmitter {
     }
   }
 
-  /** Record one chunk and transcribe it. */
+  /** Record one chunk and transcribe it — stops on 1s silence for natural pacing. */
   _recordAndTranscribe() {
     return new Promise((resolve, reject) => {
-      const chunkSeconds = (this.config.dictation && this.config.dictation.chunkSeconds) || 4;
+      const maxSeconds = (this.config.dictation && this.config.dictation.chunkSeconds) || 10;
       const audioFile = path.join(os.tmpdir(), `copilot-dictation-${Date.now()}.wav`);
+      const silenceFilter = 'silencedetect=noise=-35dB:duration=1.0';
 
       const ffmpegArgs = IS_WIN
         ? ['-f', 'dshow', '-i', `audio=${this.config.audioDevice}`,
-           '-ar', '16000', '-ac', '1', '-t', String(chunkSeconds), '-y', audioFile]
+           '-af', silenceFilter, '-ar', '16000', '-ac', '1', '-t', String(maxSeconds), '-y', audioFile]
         : ['-f', 'avfoundation', '-i', this.config.audioDevice,
-           '-ar', '16000', '-ac', '1', '-t', String(chunkSeconds), '-y', audioFile];
+           '-af', silenceFilter, '-ar', '16000', '-ac', '1', '-t', String(maxSeconds), '-y', audioFile];
 
-      const proc = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'ignore', 'ignore'] });
+      const proc = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'ignore', 'pipe'] });
       this._proc = proc;
+      let stderrBuf = '';
+      let qSent = false;
+
+      proc.stderr.on('data', chunk => {
+        stderrBuf += chunk.toString();
+        if (qSent || this._stopping) return;
+        const hasSilenceStart = stderrBuf.split('\n').some(l => {
+          const m = l.match(/silence_start:\s*([\d.]+)/);
+          return m && parseFloat(m[1]) > 0.5;
+        });
+        if (hasSilenceStart) {
+          qSent = true;
+          proc.stdin.write('q');
+          proc.stdin.end();
+        }
+      });
 
       proc.on('error', err => {
         this._proc = null;
