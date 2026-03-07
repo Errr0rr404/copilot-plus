@@ -68,25 +68,34 @@ function detectMicrophoneWindows() {
 }
 
 function parseBestMicWindows(output) {
-  // Match lines like: [dshow @ 0x...] "Microphone (Realtek Audio)" (audio)
-  const deviceRe = /\[dshow.*?\]\s+"([^"]+)"\s+\(audio\)/g;
+  const devices = parseMicDevicesWindows(output);
+  if (!devices.length) return null;
   let best = null;
   let bestScore = -Infinity;
-  let m;
-  while ((m = deviceRe.exec(output)) !== null) {
-    const name = m[1].trim();
+  for (const { id, name } of devices) {
     const score = scoreMicDevice(name);
-    if (score > bestScore) { bestScore = score; best = name; }
+    if (score > bestScore) { bestScore = score; best = id; }
   }
   return best; // Windows uses the device name directly: audio="Microphone (Realtek Audio)"
 }
 
 function parseBestMicMac(output) {
-  // Match lines like: [AVFoundation indev @ 0x...] [2] MacBook Pro Microphone
-  const deviceRe = /\[AVFoundation.*?\]\s+\[(\d+)\]\s+(.+)/g;
-
+  const devices = parseMicDevicesMac(output);
+  if (!devices.length) return null;
   let best = null;
   let bestScore = -Infinity;
+  for (const { id, name } of devices) {
+    const score = scoreMicDevice(name);
+    if (score > bestScore) { bestScore = score; best = id; }
+  }
+  return best;
+}
+
+/** Return all audio input devices on macOS as [{ id, name }]. */
+function parseMicDevicesMac(output) {
+  // Match lines like: [AVFoundation indev @ 0x...] [2] MacBook Pro Microphone
+  const deviceRe = /\[AVFoundation.*?\]\s+\[(\d+)\]\s+(.+)/g;
+  const devices = [];
   let inAudioSection = false;
 
   for (const line of output.split('\n')) {
@@ -99,10 +108,47 @@ function parseBestMicMac(output) {
     if (!m) continue;
 
     const [, index, name] = m;
-    const score = scoreMicDevice(name.trim());
-    if (score > bestScore) { bestScore = score; best = `:${index}`; }
+    devices.push({ id: `:${index}`, name: name.trim() });
   }
-  return best;
+  return devices;
+}
+
+/** Return all audio input devices on Windows as [{ id, name }]. */
+function parseMicDevicesWindows(output) {
+  const deviceRe = /\[dshow.*?\]\s+"([^"]+)"\s+\(audio\)/g;
+  const devices = [];
+  let m;
+  while ((m = deviceRe.exec(output)) !== null) {
+    const name = m[1].trim();
+    devices.push({ id: name, name });
+  }
+  return devices;
+}
+
+/**
+ * Return all detected audio input devices as [{ id, name }].
+ * On macOS id is ":N", on Windows id is the device name string.
+ */
+function listMicDevices() {
+  if (os.platform() === 'win32') {
+    try {
+      const output = execFileSync('ffmpeg', [
+        '-f', 'dshow', '-list_devices', 'true', '-i', 'dummy',
+      ], { encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] });
+      return parseMicDevicesWindows(output);
+    } catch (err) {
+      return parseMicDevicesWindows(err.stderr || '');
+    }
+  } else {
+    try {
+      const output = execFileSync('ffmpeg', [
+        '-f', 'avfoundation', '-list_devices', 'true', '-i', '',
+      ], { encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] });
+      return parseMicDevicesMac(output);
+    } catch (err) {
+      return parseMicDevicesMac(err.stderr || '');
+    }
+  }
 }
 
 function findWhisperModel() {
@@ -115,7 +161,8 @@ function load() {
     : {};
 
   // Auto-detect the microphone unless the user has explicitly set audioDevice in their config
-  const audioDevice = fileConfig.audioDevice || detectMicrophone() || ':0';
+  const defaultDevice = os.platform() === 'win32' ? null : ':0';
+  const audioDevice = fileConfig.audioDevice || detectMicrophone() || defaultDevice;
 
   const defaults = {
     modelPath: findWhisperModel(),
@@ -130,4 +177,4 @@ function save(config) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
-module.exports = { load, save, findWhisperModel, detectMicrophone, CONFIG_PATH };
+module.exports = { load, save, findWhisperModel, detectMicrophone, listMicDevices, CONFIG_PATH };

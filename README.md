@@ -84,6 +84,8 @@ copilot+ --setup
 
 You should see all green checkmarks. If anything is missing, the setup output tells you exactly what to fix.
 
+The setup wizard also lists all detected audio input devices and lets you pick the right microphone interactively — the choice is saved to `~/.copilot/copilot-plus.json` so you never need to edit the file manually.
+
 ---
 
 ## Quick Start
@@ -149,7 +151,7 @@ Settings are stored at `~/.copilot/copilot-plus.json` (created automatically on 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `modelPath` | auto-detected | Path to your whisper `.bin` model file |
-| `audioDevice` | **auto-detected** | ffmpeg audio input. macOS: index like `":2"`. Windows: device name like `"Microphone (Realtek Audio)"`. Override here if the wrong mic is used. |
+| `audioDevice` | **auto-detected** | ffmpeg audio input. Set interactively via `copilot+ --setup`, or override manually. macOS: index like `":2"`. Windows: device name like `"Microphone (Realtek Audio)"`. |
 | `autoSubmit` | `false` | `true` = automatically press Enter after transcription |
 
 ### Finding your microphone

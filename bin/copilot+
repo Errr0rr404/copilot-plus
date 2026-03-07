@@ -86,26 +86,78 @@ function runSetup() {
     }
   });
 
-  // Print config & hotkey summary after a short delay (so async checks print first)
+  // Print config, device picker & hotkey summary after a short delay (so async checks print first)
   setTimeout(() => {
     console.log('\n─────────────────────────────────────');
     console.log('Config:', cfg.CONFIG_PATH);
     console.log(`  modelPath:   ${config.modelPath || '(not set)'}`);
-    console.log(`  audioDevice: ${config.audioDevice}   (auto-detected — override in config if wrong)`);
     console.log(`  autoSubmit:  ${config.autoSubmit}   (auto-press Enter after transcription)`);
-    console.log('\nHotkeys (inside copilot+):');
-    console.log('  Ctrl+R  →  Start / stop voice recording');
-    console.log('  Ctrl+P  →  Take a screenshot (injected as @path)');
-    console.log('\nUsage:');
-    console.log('  copilot+              →  launch copilot with voice + screenshot support');
-    console.log('  copilot+ --setup      →  show this screen');
-    console.log('  copilot+ --help       →  pass --help through to copilot\n');
 
-    if (allGood) {
-      console.log('✅  All dependencies found. Run `copilot+` to start!\n');
+    // List available audio input devices and let the user pick
+    const devices = cfg.listMicDevices();
+    if (devices.length === 0) {
+      console.log(`  audioDevice: ${config.audioDevice}   (could not list devices — is ffmpeg installed?)`);
+      console.log('\nHotkeys (inside copilot+):');
+      printHotkeysAndExit(allGood);
     } else {
-      console.log('⚠️   Fix the issues above, then re-run `copilot+ --setup`.\n');
+      console.log('\nAvailable audio input devices:');
+      devices.forEach(({ id, name }, i) => {
+        const marker = id === config.audioDevice ? ' ◀ current' : '';
+        console.log(`  [${i + 1}] ${name}  (${id})${marker}`);
+      });
+
+      const autoIdx = devices.findIndex(d => d.id === config.audioDevice);
+
+      // Skip interactive prompt in non-TTY environments (CI, pipes, Homebrew test)
+      if (!process.stdin.isTTY) {
+        console.log(`  audioDevice: ${config.audioDevice || '(not set)'}   (non-interactive — run copilot+ --setup in a terminal to pick)`);
+        console.log('\nHotkeys (inside copilot+):');
+        printHotkeysAndExit(allGood);
+        return;
+      }
+
+      const rl = require('readline').createInterface({ input: process.stdin, output: process.stdout });
+      rl.question(
+        `\nChoose audio device [1-${devices.length}]${autoIdx >= 0 ? ` (Enter = keep current: ${devices[autoIdx].name})` : ''}: `,
+        (answer) => {
+          rl.close();
+          const trimmed = answer.trim();
+          if (trimmed !== '') {
+            const choice = parseInt(trimmed, 10);
+            if (!isNaN(choice) && choice >= 1 && choice <= devices.length) {
+              const chosen = devices[choice - 1];
+              // Read raw file config so we don't persist auto-detected values
+              let rawConfig = {};
+              try { rawConfig = JSON.parse(fs.readFileSync(cfg.CONFIG_PATH, 'utf8')); } catch {}
+              rawConfig.audioDevice = chosen.id;
+              cfg.save(rawConfig);
+              console.log(`✅  Audio device set to: ${chosen.name}  (${chosen.id})\n`);
+            } else {
+              console.log('⚠️   Invalid choice — audio device unchanged.\n');
+            }
+          } else {
+            console.log(`  Audio device unchanged: ${config.audioDevice}\n`);
+          }
+          console.log('Hotkeys (inside copilot+):');
+          printHotkeysAndExit(allGood);
+        }
+      );
     }
-    process.exit(0);
   }, 400);
+}
+
+function printHotkeysAndExit(allGood) {
+  console.log('  Ctrl+R  →  Start / stop voice recording');
+  console.log('  Ctrl+P  →  Take a screenshot (injected as @path)');
+  console.log('\nUsage:');
+  console.log('  copilot+              →  launch copilot with voice + screenshot support');
+  console.log('  copilot+ --setup      →  show this screen');
+  console.log('  copilot+ --help       →  pass --help through to copilot\n');
+
+  if (allGood) {
+    console.log('✅  All dependencies found. Run `copilot+` to start!\n');
+  } else {
+    console.log('⚠️   Fix the issues above, then re-run `copilot+ --setup`.\n');
+  }
+  process.exit(0);
 }

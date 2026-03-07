@@ -22,6 +22,10 @@ class VoiceRecorder {
   start() {
     if (this._proc) return;
 
+    if (!this.config.audioDevice) {
+      throw new Error('No audio device configured. Run: copilot+ --setup');
+    }
+
     this._audioFile = path.join(os.tmpdir(), `copilot-voice-${Date.now()}.wav`);
 
     const ffmpegArgs = IS_WIN
