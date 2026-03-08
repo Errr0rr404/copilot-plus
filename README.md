@@ -1,6 +1,33 @@
-# copilot-plus
+# copilot+
 
-> Talk to [GitHub Copilot CLI](https://docs.github.com/copilot/concepts/agents/about-copilot-cli) with your voice — share screenshots — switch AI models instantly — and monitor all running sessions from one dashboard.
+<p align="center">
+  <a href="https://www.npmjs.com/package/copilot-plus">
+    <img src="https://img.shields.io/npm/v/copilot-plus?color=cb3837&logo=npm&logoColor=white&label=npm" alt="npm version" />
+  </a>
+  <a href="https://www.npmjs.com/package/copilot-plus">
+    <img src="https://img.shields.io/npm/dm/copilot-plus?color=cb3837&logo=npm&logoColor=white&label=downloads" alt="npm downloads" />
+  </a>
+  <a href="https://github.com/Errr0rr404/copilot-plus/blob/main/LICENSE">
+    <img src="https://img.shields.io/npm/l/copilot-plus?color=blue" alt="license: MIT" />
+  </a>
+  <img src="https://img.shields.io/node/v/copilot-plus?color=339933&logo=node.js&logoColor=white&label=node" alt="node ≥18" />
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey" alt="platform" />
+  <a href="https://github.com/Errr0rr404/copilot-plus">
+    <img src="https://img.shields.io/github/stars/Errr0rr404/copilot-plus?style=flat&logo=github&color=yellow" alt="GitHub stars" />
+  </a>
+</p>
+
+<p align="center">
+  <strong>Talk to <a href="https://docs.github.com/copilot/concepts/agents/about-copilot-cli">GitHub Copilot CLI</a> with your voice — share screenshots — switch AI models instantly — and monitor all running sessions from one dashboard.</strong>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/copilot-plus">📦 View on npm</a> ·
+  <a href="https://github.com/Errr0rr404/copilot-plus">⭐ Star on GitHub</a> ·
+  <a href="https://github.com/Errr0rr404/copilot-plus/issues">🐛 Report a Bug</a>
+</p>
+
+---
 
 `copilot+` is a drop-in replacement for the `copilot` command. It wraps Copilot CLI transparently and adds powerful input enhancements:
 
@@ -204,7 +231,7 @@ Sessions disappear automatically when the `copilot` process exits. Stale entries
 
 ---
 
-
+## Workhorse Models
 
 Assign up to 4 AI models to slots so you can switch between them instantly with a single hotkey — no more typing `/model` each time.
 
