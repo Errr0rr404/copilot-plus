@@ -33,8 +33,8 @@
 
 | Hotkey / Command | What it does |
 |--------|-------------|
-| **Ctrl+R** | Start / stop voice recording → transcription is typed into your prompt |
-| **Ctrl+P** | Screenshot picker → file path is injected as `@/path/screenshot.png` |
+| **Ctrl+G** | Start / stop voice recording → transcription is typed into your prompt |
+| **Ctrl+O** | Screenshot picker → file path is injected as `@/path/screenshot.png` |
 | **Ctrl+K** | Open command palette — access all features from a searchable menu |
 | **Option+Shift+1–4** *(macOS Terminal.app)* | Switch to workhorse model slot 1–4 — requires "Use Option as Meta Key" |
 | **Ctrl+Shift+1–4** *(kitty/WezTerm/Windows Terminal)* | Switch to workhorse model slot 1–4 on CSI u–capable terminals |
@@ -133,12 +133,12 @@ That's it. You're now inside Copilot CLI with voice and screenshot support activ
 
 ## Using Voice Input
 
-1. **Press `Ctrl+R`** to start recording.  
+1. **Press `Ctrl+G`** to start recording.  
    A system notification appears and your terminal title changes to `🎙 Recording…`
 
 2. **Speak your prompt** naturally — e.g. _"refactor this function to use async await"_
 
-3. **Press `Ctrl+R` again** to stop.  
+3. **Press `Ctrl+G` again** to stop.  
    Transcription runs locally (`⏳ Transcribing…`) — no audio ever leaves your machine.
 
 4. **Your words appear as text** in the Copilot prompt. Review and edit if needed, then press **Enter** to send.
@@ -149,9 +149,9 @@ That's it. You're now inside Copilot CLI with voice and screenshot support activ
 
 ## Using Screenshots
 
-**macOS:** Press `Ctrl+P` — the interactive screenshot overlay opens (same UI as `⌘⇧4`). Click and drag to select any area. The file path is injected into your prompt as `@/tmp/copilot-screenshots/screenshot-<timestamp>.png`.
+**macOS:** Press `Ctrl+O` — the interactive screenshot overlay opens (same UI as `⌘⇧4`). Click and drag to select any area. The file path is injected into your prompt as `@/tmp/copilot-screenshots/screenshot-<timestamp>.png`.
 
-**Windows:** Press `Ctrl+P` — the Snip & Sketch overlay opens (same as `Win+Shift+S`). Draw a selection; the file path is injected automatically when you complete the snip.
+**Windows:** Press `Ctrl+O` — the Snip & Sketch overlay opens (same as `Win+Shift+S`). Draw a selection; the file path is injected automatically when you complete the snip.
 
 Add context if you want (e.g. _"what's wrong with this?"_), then press **Enter**.
 
@@ -395,8 +395,8 @@ Then update `modelPath` in `~/.copilot/copilot-plus.json`.
 │  copilot+ (PTY wrapper)                                            │
 │                                                                    │
 │  Your keystrokes ──► intercept hotkeys                             │
-│                      ├── Ctrl+R         → push-to-talk recording   │
-│                      ├── Ctrl+P         → screenshot picker         │
+│                      ├── Ctrl+G         → push-to-talk recording   │
+│                      ├── Ctrl+O         → screenshot picker         │
 │                      ├── Ctrl+K         → command palette overlay   │
 │                      ├── Opt+⇧1–4       → switch workhorse model    │
 │                      ├── Ctrl+⇧1–4      → switch workhorse model    │

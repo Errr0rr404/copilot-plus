@@ -1,6 +1,7 @@
 'use strict';
 
 const readline = require('readline');
+const os = require('os');
 const config = require('./config');
 
 /**
@@ -9,6 +10,12 @@ const config = require('./config');
  * Returns the updated config object.
  */
 async function runOnboarding(cfg) {
+  // Disable Win32 Input Mode — Windows Terminal may send key events as escape
+  // sequences that readline cannot parse, producing garbled output.
+  if (os.platform() === 'win32' && process.stdout.isTTY) {
+    process.stdout.write('\x1b[?9001l');
+  }
+
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
   const ask = (q) => new Promise(resolve => rl.question(q, resolve));
@@ -28,7 +35,7 @@ async function runOnboarding(cfg) {
     cfg.wakeWord.phrase = phrase || defaultPhrase;
     console.log(`✅  Voice activation enabled. Say "${cfg.wakeWord.phrase}" to start recording.\n`);
   } else {
-    console.log('    Voice activation disabled. Use Ctrl+R to record manually. Enable it later via Ctrl+K.\n');
+    console.log('    Voice activation disabled. Use Ctrl+G to record manually. Enable it later via Ctrl+K.\n');
   }
 
   // --- Prompt macros ---

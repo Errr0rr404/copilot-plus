@@ -21,8 +21,8 @@ const ACTIVE_PID_FILE = path.join(os.homedir(), '.copilot', 'copilot-plus-active
 
 const IS_WIN = os.platform() === 'win32';
 
-const CTRL_R = '\x12';
-const CTRL_P = '\x10';
+const CTRL_G = '\x07';
+const CTRL_O = '\x0f';
 const CTRL_C = '\x03';
 const CTRL_K = '\x0b';
 
@@ -33,6 +33,45 @@ const MODEL_SLOT_CSI_U_RE = /^\x1b\[(\d+);6u$/;
 // Shift+1=!  Shift+2=@  Shift+3=#  Shift+4=$  → Meta prefix makes \x1b! etc.
 const MODEL_SLOT_META_RE = /^\x1b([!@#$])$/;
 const META_SHIFTED_MAP = { '!': 1, '@': 2, '#': 3, '$': 4 };
+
+/**
+ * Translate Win32 Input Mode sequences emitted by Windows Terminal.
+ * Format: ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _
+ * Returns the translated key string for key-down events,
+ * empty string for events to discard (key-up), or null if not Win32 Input Mode.
+ */
+function translateWin32Input(str) {
+  const seqRe = /\x1b\[([\d;]*)_/g;
+  let result = '';
+  let matched = false;
+  let m;
+  while ((m = seqRe.exec(str)) !== null) {
+    matched = true;
+    const parts = m[1].split(';').map(s => parseInt(s, 10) || 0);
+    if (parts.length < 4) continue;
+    const vk = parts[0];
+    const uc = parts[2];
+    const kd = parts[3];
+    if (!kd) continue; // Ignore key-up events
+    if (uc > 0) {
+      result += String.fromCharCode(uc);
+    } else {
+      // Non-character keys: translate VK codes to ANSI escape sequences
+      switch (vk) {
+        case 38: result += '\x1b[A'; break;  // Up
+        case 40: result += '\x1b[B'; break;  // Down
+        case 37: result += '\x1b[D'; break;  // Left
+        case 39: result += '\x1b[C'; break;  // Right
+        case 36: result += '\x1b[H'; break;  // Home
+        case 35: result += '\x1b[F'; break;  // End
+        case 46: result += '\x1b[3~'; break; // Delete
+        case 27: result += '\x1b'; break;    // Escape
+      }
+    }
+  }
+  if (!matched) return null;
+  return result;
+}
 
 // Token/model patterns to scan from stripped PTY output (best-effort)
 const TOKEN_PATTERNS = [
@@ -116,6 +155,10 @@ class CopilotWrapper {
     process.stdout.on('resize', () => {
       try { shell.resize(process.stdout.columns, process.stdout.rows); } catch {}
     });
+
+    // Disable Win32 Input Mode if active — Windows Terminal may send all key
+    // events as CSI sequences which breaks raw control-code comparisons.
+    if (IS_WIN) process.stdout.write('\x1b[?9001l');
 
     process.stdin.setRawMode(true);
     process.stdin.resume();
@@ -230,10 +273,17 @@ class CopilotWrapper {
   }
 
   _handleInput(data) {
-    const key = data.toString();
+    let key = data.toString();
+
+    // Translate Win32 Input Mode sequences (Windows Terminal enhanced input)
+    const translated = translateWin32Input(key);
+    if (translated !== null) {
+      if (translated === '') return; // Key-up or unrecognized — discard
+      key = translated;
+    }
 
     if (this.palette.isOpen) {
-      this.palette.handleInput(data);
+      this.palette.handleInput(key);
       return;
     }
 
@@ -274,7 +324,7 @@ class CopilotWrapper {
       return;
     }
 
-    if (key === CTRL_R) {
+    if (key === CTRL_G) {
       if (this.voice.isRecording) {
         this._stopVoice();
       } else {
@@ -283,7 +333,7 @@ class CopilotWrapper {
       return;
     }
 
-    if (key === CTRL_P) {
+    if (key === CTRL_O) {
       this._doScreenshot();
       return;
     }
@@ -316,8 +366,8 @@ class CopilotWrapper {
       : '🗣️   Voice Activation: off';
 
     const actions = [
-      { id: 'voice', label: '🎙  Voice Recording', hint: 'Ctrl+R' },
-      { id: 'screenshot', label: '📸  Screenshot', hint: 'Ctrl+P' },
+      { id: 'voice', label: '🎙  Voice Recording', hint: 'Ctrl+G' },
+      { id: 'screenshot', label: '📸  Screenshot', hint: 'Ctrl+O' },
       { id: 'voice-activation-toggle', label: vaLabel, hint: 'toggle' },
     ];
 
@@ -451,8 +501,8 @@ class CopilotWrapper {
     try {
       this.voice.start();
       agentState.writeState(this._pid, { status: 'recording' });
-      this._setTitle('🎙 Recording… (Ctrl+R to stop, Ctrl+C to cancel)');
-      this._notify('🎙 Recording started', 'Press Ctrl+R to stop');
+      this._setTitle('🎙 Recording… (Ctrl+G to stop, Ctrl+C to cancel)');
+      this._notify('🎙 Recording started', 'Press Ctrl+G to stop');
     } catch (err) {
       this._notify('❌ Could not start recording', err.message);
       if (this.cfg.wakeWord && this.cfg.wakeWord.enabled) {
