@@ -37,7 +37,9 @@
 | **Ctrl+P** | Screenshot picker → file path is injected as `@/path/screenshot.png` |
 | **Ctrl+K** | Open command palette — access all features from a searchable menu |
 | **Option+Shift+1–4** *(macOS Terminal.app)* | Switch to workhorse model slot 1–4 — requires "Use Option as Meta Key" |
+| **Option+Shift+5** *(macOS Terminal.app)* | Toggle ⚡ Auto Mode — model selected per prompt complexity |
 | **Ctrl+Shift+1–4** *(kitty/WezTerm/Windows Terminal)* | Switch to workhorse model slot 1–4 on CSI u–capable terminals |
+| **Ctrl+Shift+5** *(kitty/WezTerm/Windows Terminal)* | Toggle ⚡ Auto Mode on CSI u–capable terminals |
 | **Option+1–9** *(macOS Terminal.app)* | Execute a prompt macro — requires "Use Option as Meta Key" |
 | **Ctrl+1–9** *(kitty/WezTerm/Windows Terminal)* | Execute a prompt macro on CSI u–capable terminals |
 | `copilot+ --monitor` | Open the real-time agent dashboard |
@@ -179,13 +181,14 @@ Press **Ctrl+K** to open the command palette — a searchable overlay listing ev
 - 🎙 Voice Recording
 - 📸 Screenshot
 - 🗣️ Voice Activation (toggle on/off)
+- ⚡ Auto Mode (toggle on/off) + configure Fast / Medium / Powerful model tiers
 - 🤖 Workhorse Models 1–4 (switch or configure model slots)
 - ⌨️ Macros 1–9 (execute or edit inline)
 - ⚙️ Open Preferences
 
 **Navigation:** `↑↓` to move, type to filter, **Enter** to select, **Esc** to close.
 
-**Editing items from the palette:** Navigate to any workhorse model or macro entry and press **Enter** to open an inline editor. Then:
+**Editing items from the palette:** Navigate to any workhorse model, auto model tier, or macro entry and press **Enter** to open an inline editor. Then:
 - **Enter** — save and immediately activate (switch model / run macro)
 - **Tab** — save without activating
 - **Esc** — go back without saving
@@ -262,6 +265,53 @@ You can also edit `~/.copilot/copilot-plus.json` directly:
 | **Any terminal** | **Ctrl+K** → navigate to a Workhorse entry → **Enter** |
 
 Switching clears the current input line and sends `/model <name>` to Copilot CLI, then shows a macOS/Windows notification confirming the switch.
+
+> **Note:** Activating a workhorse slot (1–4) automatically turns Auto Mode off.
+
+---
+
+## ⚡ Auto Mode
+
+Auto Mode routes each prompt to the right model automatically — no manual switching required.
+
+### How it works
+
+When Auto Mode is on, copilot+ intercepts every **Enter** keypress, analyses the prompt you typed, picks a model tier, and switches to it (if needed) before submitting:
+
+| Tier | When selected | Example prompts |
+|------|--------------|-----------------|
+| **Fast** | Short prompts (<80 chars) with question/explanation keywords | "explain this function", "what is a closure?" |
+| **Powerful** | Long prompts (>200 chars) or implementation/task keywords | "implement", "refactor", "debug", "build", "create" |
+| **Medium** | Everything else | general conversation, moderate-length requests |
+
+### Setup
+
+Configure the three tiers via **Ctrl+K** → navigate to an **Auto** entry → **Enter** → type a model name → **Enter**.
+
+Or edit `~/.copilot/copilot-plus.json` directly:
+
+```json
+{
+  "autoModels": {
+    "fast":     "claude-haiku-4.5",
+    "medium":   "claude-sonnet-4.6",
+    "powerful": "claude-opus-4.6"
+  }
+}
+```
+
+If a tier is left empty it falls back to the corresponding workhorse slot (`fast`/`medium` → slot 1, `powerful` → slot 2).
+
+### Toggling Auto Mode
+
+| Terminal | Hotkey |
+|----------|--------|
+| **macOS Terminal.app** | **Option+Shift+5** — requires "Use Option as Meta Key" |
+| **kitty / WezTerm** | **Ctrl+Shift+5** — works natively |
+| **Windows Terminal** | **Ctrl+Shift+5** — works natively |
+| **Any terminal** | **Ctrl+K** → **⚡ Auto Mode** → **Enter** |
+
+When active, the terminal title shows `copilot [⚡ auto]` and a notification fires on each prompt showing which tier was selected. Switching to a workhorse slot (1–4) automatically turns Auto Mode off.
 
 ---
 
@@ -344,6 +394,11 @@ Settings are stored at `~/.copilot/copilot-plus.json` (created automatically on 
     "3": "gpt-4.1",
     "4": "o3"
   },
+  "autoModels": {
+    "fast":     "claude-haiku-4.5",
+    "medium":   "claude-sonnet-4.6",
+    "powerful": "claude-opus-4.6"
+  },
   "macros": {
     "1": "Write unit tests for this code",
     "2": "Explain this code step by step"
@@ -362,6 +417,9 @@ Settings are stored at `~/.copilot/copilot-plus.json` (created automatically on 
 | `audioDevice` | auto-detected | ffmpeg audio input device. Set interactively via `copilot+ --setup`. macOS: `":2"` index format. Windows: `"Microphone (Realtek Audio)"` name format. |
 | `autoSubmit` | `false` | `true` = automatically press Enter after voice transcription |
 | `workhorseModels` | all empty | AI model slots 1–4. Edit via Ctrl+K command palette or directly here. |
+| `autoModels.fast` | empty | Model for short Q&A prompts. Falls back to workhorse slot 1. |
+| `autoModels.medium` | empty | Model for general prompts. Falls back to workhorse slot 1. |
+| `autoModels.powerful` | empty | Model for long/complex/task prompts. Falls back to workhorse slot 2. |
 | `macros` | all empty | Prompt macros, slots 1–9. Edit via Ctrl+K or `--preferences`. |
 | `wakeWord.enabled` | `false` | Enable voice activation (wake phrase detection) |
 | `wakeWord.phrase` | `"hey copilot"` | The phrase to listen for |
@@ -399,7 +457,9 @@ Then update `modelPath` in `~/.copilot/copilot-plus.json`.
 │                      ├── Ctrl+P         → screenshot picker         │
 │                      ├── Ctrl+K         → command palette overlay   │
 │                      ├── Opt+⇧1–4       → switch workhorse model    │
+│                      ├── Opt+⇧5         → toggle ⚡ auto mode        │
 │                      ├── Ctrl+⇧1–4      → switch workhorse model    │
+│                      ├── Ctrl+⇧5        → toggle ⚡ auto mode        │
 │                      ├── Option+1–9     → inject macro (macOS)      │
 │                      ├── Ctrl+1–9       → inject macro (CSI u)      │
 │                      ▼                                              │
@@ -474,7 +534,7 @@ curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.
   -o ~/.copilot/models/ggml-tiny.en.bin
 ```
 
-**Option+Shift+1–4 model slots / Option+1–9 macros don't work (macOS Apple Terminal)**  
+**Option+Shift+1–5 model slots / Option+1–9 macros don't work (macOS Apple Terminal)**  
 Open Terminal → Settings → Profiles → Keyboard → check **"Use Option as Meta Key"**.
 
 **Model slot hotkey does nothing (kitty/WezTerm/Windows Terminal)**  

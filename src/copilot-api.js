@@ -6,27 +6,74 @@
  * Used by copilot+ --monitor to display account-level quota information
  * (premium interactions used/remaining) in the dashboard header.
  *
- * Auth token is read from ~/.config/github-copilot/apps.json, which is
- * written by the copilot CLI on first login — no extra credentials needed.
+ * Auth token is resolved from common GitHub token sources (env vars,
+ * `gh auth token`, or legacy Copilot token files) so the monitor works
+ * across macOS and Windows setups.
  */
 
 const fs    = require('fs');
 const https = require('https');
 const os    = require('os');
 const path  = require('path');
+const { execFileSync } = require('child_process');
 
-const APPS_FILE = path.join(os.homedir(), '.config', 'github-copilot', 'apps.json');
 const CACHE_MS  = 5 * 60 * 1000; // refresh quota every 5 minutes
+const LEGACY_APPS_FILES = (() => {
+  const files = [
+    path.join(os.homedir(), '.config', 'github-copilot', 'apps.json'),
+  ];
+
+  if (os.platform() === 'darwin') {
+    files.push(path.join(os.homedir(), 'Library', 'Application Support', 'github-copilot', 'apps.json'));
+  }
+
+  if (os.platform() === 'win32') {
+    if (process.env.APPDATA) {
+      files.push(path.join(process.env.APPDATA, 'github-copilot', 'apps.json'));
+    }
+    if (process.env.LOCALAPPDATA) {
+      files.push(path.join(process.env.LOCALAPPDATA, 'github-copilot', 'apps.json'));
+    }
+  }
+
+  return [...new Set(files)];
+})();
 
 // ── Auth token ────────────────────────────────────────────────────────────────
-function _readOAuthToken() {
+function _readOAuthTokenFromEnv() {
+  return process.env.COPILOT_GITHUB_TOKEN || process.env.GH_TOKEN || process.env.GITHUB_TOKEN || null;
+}
+
+function _readOAuthTokenFromGh() {
   try {
-    const data = JSON.parse(fs.readFileSync(APPS_FILE, 'utf8'));
-    for (const v of Object.values(data)) {
-      if (v && v.oauth_token) return v.oauth_token;
-    }
-  } catch {}
+    const token = execFileSync('gh', ['auth', 'token'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 3000,
+    }).trim();
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
+function _readOAuthTokenFromLegacyAppsFile() {
+  for (const appsFile of LEGACY_APPS_FILES) {
+    if (!fs.existsSync(appsFile)) continue;
+    try {
+      const data = JSON.parse(fs.readFileSync(appsFile, 'utf8'));
+      for (const v of Object.values(data)) {
+        if (v && v.oauth_token) return v.oauth_token;
+      }
+    } catch {}
+  }
   return null;
+}
+
+function _readOAuthToken() {
+  return _readOAuthTokenFromEnv()
+    || _readOAuthTokenFromGh()
+    || _readOAuthTokenFromLegacyAppsFile();
 }
 
 // ── HTTP helper ───────────────────────────────────────────────────────────────

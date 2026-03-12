@@ -13,6 +13,7 @@ const MacroManager = require('./macros');
 const CommandPalette = require('./palette');
 const WakeWordListener = require('./wakeword');
 const agentState = require('./agent-state');
+const { execPowerShell } = require('./windows-shell');
 
 // Shared file used to coordinate wake word activation across multiple copilot+ instances.
 // Whichever instance the user most recently typed in is considered "active" and will
@@ -26,13 +27,13 @@ const CTRL_P = '\x10';
 const CTRL_C = '\x03';
 const CTRL_K = '\x0b';
 
-// Ctrl+Shift+1–4 in CSI u encoding (modifier 6 = Ctrl+Shift), sent by kitty/WezTerm
+// Ctrl+Shift+1–5 in CSI u encoding (modifier 6 = Ctrl+Shift), sent by kitty/WezTerm
 const MODEL_SLOT_CSI_U_RE = /^\x1b\[(\d+);6u$/;
 
-// Option+Shift+1–4 on macOS Terminal.app / iTerm2 with "Use Option as Meta Key"
-// Shift+1=!  Shift+2=@  Shift+3=#  Shift+4=$  → Meta prefix makes \x1b! etc.
-const MODEL_SLOT_META_RE = /^\x1b([!@#$])$/;
-const META_SHIFTED_MAP = { '!': 1, '@': 2, '#': 3, '$': 4 };
+// Option+Shift+1–5 on macOS Terminal.app / iTerm2 with "Use Option as Meta Key"
+// Shift+1=!  Shift+2=@  Shift+3=#  Shift+4=$  Shift+5=%  → Meta prefix makes \x1b! etc.
+const MODEL_SLOT_META_RE = /^\x1b([!@#$%])$/;
+const META_SHIFTED_MAP = { '!': 1, '@': 2, '#': 3, '$': 4, '%': 5 };
 
 // Token/model patterns to scan from stripped PTY output (best-effort)
 const TOKEN_PATTERNS = [
@@ -55,6 +56,45 @@ function stripAnsi(s) {
 function parseNum(s) {
   if (!s) return 0;
   return parseInt(s.replace(/,/g, ''), 10) || 0;
+}
+
+const AUTO_FAST_KEYWORDS = [
+  'explain', 'what is', "what's", 'define', 'summarize', 'list', 'show me',
+  'describe', 'how does', 'what does', 'tell me', 'what are', 'why does',
+  'who is', 'where is', 'when did', 'how many', 'how much', 'is it', 'can you',
+];
+const AUTO_POWERFUL_KEYWORDS = [
+  'implement', 'build', 'create', 'refactor', 'rewrite', 'fix', 'debug',
+  'architect', 'design', 'migrate', 'optimize', 'write', 'generate', 'add',
+  'update', 'change', 'modify', 'test', 'review', 'analyse', 'analyze',
+  'convert', 'integrate', 'deploy', 'configure', 'set up', 'setup',
+];
+
+/** Pick a model based on prompt complexity. Returns empty string if tiers are unconfigured. */
+function selectAutoModel(prompt, cfg) {
+  const text = prompt.toLowerCase().trim();
+  const len = text.length;
+  const am = cfg.autoModels || {};
+  const wm = cfg.workhorseModels || {};
+  const fast    = am.fast    || wm[1] || '';
+  const medium  = am.medium  || wm[1] || '';
+  const powerful = am.powerful || wm[2] || '';
+
+  const hasFast     = AUTO_FAST_KEYWORDS.some(k => text.includes(k));
+  const hasPowerful = AUTO_POWERFUL_KEYWORDS.some(k => text.includes(k));
+
+  if (len > 200 || hasPowerful) return powerful;
+  if (len < 80 && hasFast && !hasPowerful) return fast;
+  return medium;
+}
+
+/** Return 'fast' | 'medium' | 'powerful' classification label for a prompt. */
+function classifyPrompt(prompt) {
+  const text = prompt.toLowerCase().trim();
+  const len = text.length;
+  if (len > 200 || AUTO_POWERFUL_KEYWORDS.some(k => text.includes(k))) return 'powerful';
+  if (len < 80 && AUTO_FAST_KEYWORDS.some(k => text.includes(k))) return 'fast';
+  return 'medium';
 }
 
 function resolveBin(name) {
@@ -80,6 +120,10 @@ class CopilotWrapper {
     this._tokensOut = 0;
     this._exchanges = 0;
     this._outputBuf = ''; // rolling plain-text buffer for token/model parsing
+    this._autoMode = false;
+    this._autoInputBuf = ''; // shadow buffer tracking typed input when auto mode is on
+    this._autoCursor = 0;
+    this._autoInputDirty = false;
   }
 
   start() {
@@ -117,12 +161,21 @@ class CopilotWrapper {
       try { shell.resize(process.stdout.columns, process.stdout.rows); } catch {}
     });
 
-    process.stdin.setRawMode(true);
     process.stdin.resume();
-    process.stdin.on('data', data => {
-      this._markActive();
-      this._handleInput(data);
-    });
+    if (process.stdin.isTTY && typeof process.stdin.setRawMode === 'function') {
+      process.stdin.setRawMode(true);
+      process.on('exit', () => {
+        try { process.stdin.setRawMode(false); } catch {}
+      });
+      process.stdin.on('data', data => {
+        this._markActive();
+        this._handleInput(data);
+      });
+    } else {
+      process.stdin.on('data', data => {
+        shell.write(data.toString());
+      });
+    }
 
     // Voice activation: wake phrase -> record until pause -> inject -> resume listening
     if (this.cfg.wakeWord && this.cfg.wakeWord.enabled) {
@@ -160,9 +213,8 @@ class CopilotWrapper {
 
   /** Returns the best-known current model name (from config or runtime tracking). */
   _resolveCurrentModel() {
-    if (this._currentModel) return this._currentModel;
-    const wm = this.cfg.workhorseModels || {};
-    return wm[1] || '';
+    const model = this._currentModel || (this.cfg.workhorseModels || {})[1] || '';
+    return this._autoMode ? `⚡auto(${model || '?'})` : model;
   }
 
   /** Called on every PTY data chunk — parses for tokens and model name. */
@@ -237,17 +289,17 @@ class CopilotWrapper {
       return;
     }
 
-    // Ctrl+Shift+1–4 (CSI u modifier 6): switch workhorse model slots
+    // Ctrl+Shift+1–5 (CSI u modifier 6): switch workhorse model slots / auto
     const modelCsi = MODEL_SLOT_CSI_U_RE.exec(key);
     if (modelCsi) {
       const code = parseInt(modelCsi[1], 10);
-      if (code >= 49 && code <= 52) {
+      if (code >= 49 && code <= 53) {
         this._switchModel(code - 48);
         return;
       }
     }
 
-    // Option+Shift+1–4 (macOS Terminal.app / iTerm2 with "Use Option as Meta Key")
+    // Option+Shift+1–5 (macOS Terminal.app / iTerm2 with "Use Option as Meta Key")
     const modelMeta = MODEL_SLOT_META_RE.exec(key);
     if (modelMeta) {
       const slot = META_SHIFTED_MAP[modelMeta[1]];
@@ -261,6 +313,8 @@ class CopilotWrapper {
     if (macroSlot !== null) {
       const prompt = this.macros.get(macroSlot);
       if (prompt) {
+        if (this.cfg.autoSubmit) this._resetAutoInputTracking();
+        else this._markAutoInputDirty();
         this._shell.write(prompt + (this.cfg.autoSubmit ? '\r' : ''));
         this._notify(`⌨️ Macro ${macroSlot}`, prompt.length > 50 ? prompt.slice(0, 47) + '…' : prompt);
       } else {
@@ -292,10 +346,24 @@ class CopilotWrapper {
       this.voice.cancel();
       this._setTitle('copilot');
       this._notify('🚫 Recording cancelled', '');
+      return;
+    }
+
+    // Track shadow buffer for auto mode (best-effort; handles common editing keys)
+    if (this._autoMode) {
+      this._trackAutoInput(key);
     }
 
     // Track when user submits a prompt (Enter key) for the monitor's attention heuristic
     if (key === '\r' || key === '\n') {
+      // In auto mode, intercept Enter to inject an automatic model switch before submitting
+      if (this._autoMode && !this._autoInputDirty && this._autoInputBuf.trim()) {
+        const prompt = this._autoInputBuf.trim();
+        this._resetAutoInputTracking();
+        this._injectAutoModel(prompt);
+        return; // _injectAutoModel handles sending Enter (and the prompt) to the shell
+      }
+      this._resetAutoInputTracking();
       this._exchanges++;
       agentState.writeState(this._pid, {
         lastInputAt: new Date().toISOString(),
@@ -321,6 +389,31 @@ class CopilotWrapper {
       { id: 'voice-activation-toggle', label: vaLabel, hint: 'toggle' },
     ];
 
+    const autoModeLabel = this._autoMode
+      ? '⚡  Auto Mode: ON  (per-prompt model routing)'
+      : '⚡  Auto Mode: off';
+    actions.push({ id: 'auto-mode-toggle', label: autoModeLabel, hint: 'Opt+⇧5 / Ctrl+Shift+5' });
+
+    const autoModels = this.cfg.autoModels || {};
+    const AUTO_TIERS = [
+      { key: 'fast',     hint: 'short Q&A' },
+      { key: 'medium',   hint: 'general'   },
+      { key: 'powerful', hint: 'complex tasks' },
+    ];
+    for (const { key, hint } of AUTO_TIERS) {
+      const model = autoModels[key] || '';
+      const preview = model || '(not set — falls back to workhorse slot)';
+      const label = key.charAt(0).toUpperCase() + key.slice(1);
+      actions.push({
+        id: `auto-model-${key}`,
+        label: `⚡  Auto ${label}: ${preview}`,
+        hint,
+        editable: true,
+        editTitle: `Auto ${label} Model`,
+        value: model,
+      });
+    }
+
     const workhorseModels = this.cfg.workhorseModels || {};
     for (let i = 1; i <= 4; i++) {
       const model = workhorseModels[i] || '';
@@ -328,7 +421,7 @@ class CopilotWrapper {
       actions.push({
         id: `model-${i}`,
         label: `🤖  Workhorse ${i}: ${preview}`,
-        hint: `Opt+⇧${i}`,
+        hint: `Opt+⇧${i} / Ctrl+Shift+${i}`,
         editable: true,
         editTitle: `Workhorse Model ${i}`,
         value: model,
@@ -356,10 +449,18 @@ class CopilotWrapper {
       if (!result) return;
 
       if (typeof result === 'object') {
+        if (result.id.startsWith('auto-model-')) {
+          const tier = result.id.replace('auto-model-', '');
+          this.cfg.autoModels = Object.assign({}, this.cfg.autoModels, { [tier]: result.value });
+          config.patch({ autoModels: { [tier]: result.value } });
+          this._notify(`⚡ Auto ${tier} saved`, result.value || '(cleared — will use workhorse fallback)');
+          return;
+        }
+
         if (result.id.startsWith('model-')) {
           const slot = parseInt(result.id.split('-')[1], 10);
           this.cfg.workhorseModels = Object.assign({}, this.cfg.workhorseModels, { [slot]: result.value });
-          config.save(this.cfg);
+          config.patch({ workhorseModels: { [slot]: result.value } });
           this._notify(
             `🤖 Workhorse ${slot} saved`,
             result.value || '(cleared)'
@@ -373,7 +474,7 @@ class CopilotWrapper {
         const slot = parseInt(result.id.split('-')[1], 10);
         this.macros.set(slot, result.value);
         this.cfg.macros = Object.assign({}, this.cfg.macros, { [slot]: result.value });
-        config.save(this.cfg);
+        config.patch({ macros: { [slot]: result.value } });
         this._notify(
           `⌨️ Macro ${slot} saved`,
           result.value.length > 50 ? result.value.slice(0, 47) + '…' : result.value || '(cleared)'
@@ -390,6 +491,9 @@ class CopilotWrapper {
 
   _executePaletteAction(actionId) {
     switch (actionId) {
+      case 'auto-mode-toggle':
+        this._switchModel(5);
+        break;
       case 'voice':
         if (this.voice.isRecording) this._stopVoice();
         else this._startVoice();
@@ -401,11 +505,11 @@ class CopilotWrapper {
         if (this.wakeWord.isListening) {
           this.wakeWord.stop();
           this.cfg.wakeWord.enabled = false;
-          config.save(this.cfg);
+          config.patch({ wakeWord: { enabled: false } });
           this._notify('🗣️ Voice Activation off', 'Run copilot+ --preferences to re-enable');
         } else {
           this.cfg.wakeWord.enabled = true;
-          config.save(this.cfg);
+          config.patch({ wakeWord: { enabled: true } });
           this.wakeWord.start()
             .then(() => {
               const phrase = (this.cfg.wakeWord && this.cfg.wakeWord.phrase) || 'hey copilot';
@@ -420,29 +524,153 @@ class CopilotWrapper {
         this._notify('⚙️ Preferences', 'Exit and run: copilot+ --preferences');
         break;
       default:
-        if (actionId.startsWith('model-')) {
+        if (actionId.startsWith('auto-model-')) {
+          // handled via object result (editable) — no-op here
+        } else if (actionId.startsWith('model-')) {
           const slot = parseInt(actionId.split('-')[1], 10);
           this._switchModel(slot);
         } else if (actionId.startsWith('macro-')) {
           const slot = parseInt(actionId.split('-')[1], 10);
           const prompt = this.macros.get(slot);
-          if (prompt) this._shell.write(prompt + (this.cfg.autoSubmit ? '\r' : ''));
+          if (prompt) {
+            if (this.cfg.autoSubmit) this._resetAutoInputTracking();
+            else this._markAutoInputDirty();
+            this._shell.write(prompt + (this.cfg.autoSubmit ? '\r' : ''));
+          }
         }
         break;
     }
   }
 
   _switchModel(slot) {
+    // Slot 5 is the special "auto" mode toggle
+    if (slot === 5) {
+      this._autoMode = !this._autoMode;
+      this._resetAutoInputTracking();
+      if (this._autoMode) {
+        this._setTitle('copilot [⚡ auto]');
+        this._notify('⚡ Auto Mode ON', 'Model selected per prompt complexity (fast / medium / powerful)');
+      } else {
+        this._setTitle('copilot');
+        this._notify('⚡ Auto Mode OFF', 'Manual model selection restored');
+      }
+      agentState.writeState(this._pid, { model: this._resolveCurrentModel() });
+      return;
+    }
+
     const model = this.cfg.workhorseModels && this.cfg.workhorseModels[slot];
     if (!model) {
       this._notify(`🤖 Workhorse ${slot} not set`, 'Press Ctrl+K to configure model slots');
       return;
     }
+    this._autoMode = false; // switching to an explicit slot turns auto mode off
+    this._resetAutoInputTracking();
     this._currentModel = model;
     agentState.writeState(this._pid, { model });
     // Ctrl+U clears the current input line before injecting the /model command
     this._shell.write(`\x15/model ${model}\r`);
     this._notify(`🤖 Switched to Workhorse ${slot}`, model);
+  }
+
+  /** Analyse prompt complexity, optionally switch model, then submit the prompt. */
+  _injectAutoModel(prompt) {
+    const target = selectAutoModel(prompt, this.cfg);
+    const tier   = classifyPrompt(prompt);
+    this._exchanges++;
+    agentState.writeState(this._pid, {
+      lastInputAt: new Date().toISOString(),
+      exchanges: this._exchanges,
+      status: 'idle',
+    });
+
+    if (target && target !== this._currentModel) {
+      this._currentModel = target;
+      agentState.writeState(this._pid, { model: this._resolveCurrentModel() });
+      // Clear current line, switch model, re-submit the buffered prompt in one sequence.
+      // Copilot's readline processes these line-by-line from the PTY buffer.
+      this._shell.write(`\x15/model ${target}\r${prompt}\r`);
+      this._notify(`⚡ Auto → ${target}`, `${tier} prompt`);
+    } else {
+      // Model is already correct — just submit normally
+      this._shell.write('\r');
+    }
+  }
+
+  _resetAutoInputTracking() {
+    this._autoInputBuf = '';
+    this._autoCursor = 0;
+    this._autoInputDirty = false;
+  }
+
+  _markAutoInputDirty() {
+    this._autoInputBuf = '';
+    this._autoCursor = 0;
+    this._autoInputDirty = true;
+  }
+
+  _trackAutoInput(key) {
+    if (key === '\r' || key === '\n') return;
+
+    if (key === '\x7f' || key === '\x08') {
+      if (this._autoCursor === 0) return;
+      this._autoInputBuf =
+        this._autoInputBuf.slice(0, this._autoCursor - 1) +
+        this._autoInputBuf.slice(this._autoCursor);
+      this._autoCursor -= 1;
+      return;
+    }
+
+    if (key === '\x15') {
+      this._resetAutoInputTracking();
+      return;
+    }
+
+    if (key === '\x17') {
+      const before = this._autoInputBuf.slice(0, this._autoCursor);
+      const after = this._autoInputBuf.slice(this._autoCursor);
+      const nextBefore = before.replace(/\S+\s*$/, '');
+      this._autoInputBuf = nextBefore + after;
+      this._autoCursor = nextBefore.length;
+      return;
+    }
+
+    if (key === '\x01' || key === '\x1b[H' || key === '\x1b[1~' || key === '\x1bOH') {
+      this._autoCursor = 0;
+      return;
+    }
+
+    if (key === '\x05' || key === '\x1b[F' || key === '\x1b[4~' || key === '\x1bOF') {
+      this._autoCursor = this._autoInputBuf.length;
+      return;
+    }
+
+    if (key === '\x1b[D') {
+      this._autoCursor = Math.max(0, this._autoCursor - 1);
+      return;
+    }
+
+    if (key === '\x1b[C') {
+      this._autoCursor = Math.min(this._autoInputBuf.length, this._autoCursor + 1);
+      return;
+    }
+
+    if (key === '\x1b[3~') {
+      this._autoInputBuf =
+        this._autoInputBuf.slice(0, this._autoCursor) +
+        this._autoInputBuf.slice(this._autoCursor + 1);
+      return;
+    }
+
+    if (/^[^\x00-\x1F\x7F]+$/u.test(key)) {
+      this._autoInputBuf =
+        this._autoInputBuf.slice(0, this._autoCursor) +
+        key +
+        this._autoInputBuf.slice(this._autoCursor);
+      this._autoCursor += key.length;
+      return;
+    }
+
+    this._markAutoInputDirty();
   }
 
   _startVoice() {
@@ -473,6 +701,8 @@ class CopilotWrapper {
       .then(text => {
         this._setTitle('copilot');
         if (text) {
+          if (this.cfg.autoSubmit) this._resetAutoInputTracking();
+          else this._markAutoInputDirty();
           const phrase = ((this.cfg.wakeWord && this.cfg.wakeWord.phrase) || '').toLowerCase().trim();
           let cleaned = text;
           if (phrase && cleaned.toLowerCase().startsWith(phrase)) {
@@ -512,6 +742,8 @@ class CopilotWrapper {
         this._setTitle('copilot');
         agentState.writeState(this._pid, { status: 'idle' });
         if (text) {
+          if (this.cfg.autoSubmit) this._resetAutoInputTracking();
+          else this._markAutoInputDirty();
           this._shell.write(text + (this.cfg.autoSubmit ? '\r' : ''));
           this._notify('✅ Done', text.length > 80 ? text.slice(0, 77) + '…' : text);
         } else {
@@ -541,6 +773,7 @@ class CopilotWrapper {
       .then(filePath => {
         this._setTitle('copilot');
         if (filePath) {
+          this._markAutoInputDirty();
           this._shell.write(`@${filePath} `);
           this._notify('✅ Screenshot attached', filePath);
           this._nudgeResize();
@@ -593,19 +826,28 @@ class CopilotWrapper {
     if (IS_WIN) {
       const ps = `
         Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+        $title = $env:COPILOT_PLUS_NOTIFY_TITLE
+        $subtitle = $env:COPILOT_PLUS_NOTIFY_SUBTITLE
         $n = New-Object System.Windows.Forms.NotifyIcon
         $n.Icon = [System.Drawing.SystemIcons]::Information
         $n.Visible = $true
-        $n.ShowBalloonTip(3000, ${JSON.stringify(title)}, ${JSON.stringify(subtitle)}, [System.Windows.Forms.ToolTipIcon]::Info)
+        $n.ShowBalloonTip(3000, $title, $subtitle, [System.Windows.Forms.ToolTipIcon]::Info)
         Start-Sleep -Milliseconds 3500
         $n.Dispose()
       `;
-      execFile('powershell', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', ps]).unref();
+      execPowerShell(ps, ['-STA', '-WindowStyle', 'Hidden'], {
+        env: Object.assign({}, process.env, {
+          COPILOT_PLUS_NOTIFY_TITLE: title,
+          COPILOT_PLUS_NOTIFY_SUBTITLE: subtitle,
+        }),
+        windowsHide: true,
+      }).on('error', () => {}).unref();
     } else {
       execFile('osascript', [
         '-e',
         `display notification ${JSON.stringify(subtitle)} with title ${JSON.stringify(title)}`,
-      ]).unref();
+      ]).on('error', () => {}).unref();
     }
   }
 }

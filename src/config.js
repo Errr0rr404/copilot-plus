@@ -163,6 +163,7 @@ function defaultConfig() {
     macros: { 1: '', 2: '', 3: '', 4: '', 5: '', 6: '', 7: '', 8: '', 9: '' },
     wakeWord: { enabled: false, phrase: 'hey copilot', chunkSeconds: 2 },
     workhorseModels: { 1: '', 2: '', 3: '', 4: '' },
+    autoModels: { fast: '', medium: '', powerful: '' },
   };
 }
 
@@ -188,6 +189,7 @@ function load() {
   merged.macros = Object.assign({}, defaults.macros, fileConfig.macros);
   merged.wakeWord = Object.assign({}, defaults.wakeWord, fileConfig.wakeWord);
   merged.workhorseModels = Object.assign({}, defaults.workhorseModels, fileConfig.workhorseModels);
+  merged.autoModels = Object.assign({}, defaults.autoModels, fileConfig.autoModels);
 
   return merged;
 }
@@ -197,4 +199,24 @@ function save(config) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
-module.exports = { load, save, findWhisperModel, detectMicrophone, listMicDevices, CONFIG_PATH };
+/**
+ * Read the raw saved config from disk, shallow-merge `updates` (with
+ * one-level deep merge for known object keys like macros, wakeWord, etc.),
+ * and write back.  This avoids persisting runtime-derived values such as
+ * the auto-detected audioDevice.
+ */
+function patch(updates) {
+  let raw = {};
+  try { raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')); } catch {}
+  for (const [key, value] of Object.entries(updates)) {
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)
+        && raw[key] !== null && typeof raw[key] === 'object' && !Array.isArray(raw[key])) {
+      raw[key] = Object.assign({}, raw[key], value);
+    } else {
+      raw[key] = value;
+    }
+  }
+  save(raw);
+}
+
+module.exports = { load, save, patch, findWhisperModel, detectMicrophone, listMicDevices, CONFIG_PATH };

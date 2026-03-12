@@ -22,7 +22,10 @@ if (process.argv.includes('--monitor')) {
 
 // ─── Setup mode ────────────────────────────────────────────────────────────────
 if (process.argv.includes('--setup')) {
-  runSetup(); // process exits inside runSetup via setTimeout
+  runSetup().catch(err => {
+    console.error('Error:', err.message);
+    process.exit(1);
+  });
   return;
 }
 
@@ -48,142 +51,154 @@ if (process.argv.includes('--preferences')) {
 
   const wrapper = new CopilotWrapper(args, config);
   wrapper.start();
-})();
+})().catch(err => {
+  console.error('Error:', err.message);
+  process.exit(1);
+});
 
 // ─── Setup helper ──────────────────────────────────────────────────────────────
-function runSetup() {
+async function runSetup() {
   const config = cfg.load();
 
   console.log('\n🛠  copilot-plus setup\n');
   console.log('Checking dependencies…\n');
 
-  let allGood = true;
+  const [hasCopilot, hasFfmpeg, hasWhisper] = await Promise.all([
+    checkBinary('copilot', {
+      found: '✅  copilot   — found',
+      missing: [
+        '❌  copilot   — not found in PATH',
+        '     Install: https://github.com/github/copilot-cli',
+      ],
+    }),
+    checkBinary('ffmpeg', {
+      found: '✅  ffmpeg    — found',
+      missing: IS_WIN
+        ? ['❌  ffmpeg    — not found', '     Install: winget install Gyan.FFmpeg']
+        : ['❌  ffmpeg    — not found', '     Install: brew install ffmpeg'],
+    }),
+    checkBinary('whisper-cli', {
+      found: '✅  whisper-cli — found',
+      missing: IS_WIN
+        ? [
+            '❌  whisper-cli — not found',
+            '     Install: https://github.com/ggerganov/whisper.cpp/releases',
+            '     Place whisper-cli.exe somewhere on your PATH',
+          ]
+        : [
+            '❌  whisper-cli — not found',
+            '     Install: brew install whisper-cpp',
+            '     Model:   whisper-cpp-download-ggml-model base.en',
+          ],
+    }),
+  ]);
 
-  // Check copilot
-  execFile(WHICH, ['copilot'], (err) => {
-    if (err) {
-      console.log('❌  copilot   — not found in PATH');
-      console.log('     Install: https://github.com/github/copilot-cli\n');
-      allGood = false;
+  let allGood = hasCopilot && hasFfmpeg && hasWhisper;
+
+  if (hasWhisper) {
+    const model = cfg.findWhisperModel();
+    if (model) {
+      console.log(`✅  model        — ${model}`);
     } else {
-      console.log('✅  copilot   — found');
+      console.log('❌  model        — no model file found');
+      console.log('     Option A: whisper-cpp-download-ggml-model base.en');
+      console.log('     Option B: mkdir -p ~/.copilot/models && curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin -o ~/.copilot/models/ggml-base.en.bin\n');
+      allGood = false;
     }
+  }
+
+  console.log('\n─────────────────────────────────────');
+  console.log('Config:', cfg.CONFIG_PATH);
+  console.log(`  modelPath:      ${config.modelPath || '(not set)'}`);
+  console.log(`  autoSubmit:     ${config.autoSubmit}   (auto-press Enter after transcription)`);
+  console.log(`  voice activation: ${config.wakeWord && config.wakeWord.enabled ? `enabled (phrase: "${config.wakeWord.phrase || 'hey copilot'}")` : 'disabled'}`);
+  const macroCount = Object.values(config.macros).filter(Boolean).length;
+  console.log(`  macros:         ${macroCount}/9 configured`);
+
+  const devices = cfg.listMicDevices();
+  if (devices.length === 0) {
+    console.log(`  audioDevice: ${config.audioDevice}   (could not list devices — is ffmpeg installed?)`);
+    console.log('\nHotkeys (inside copilot+):');
+    printHotkeysAndExit(allGood);
+    return;
+  }
+
+  console.log('\nAvailable audio input devices:');
+  devices.forEach(({ id, name }, i) => {
+    const marker = id === config.audioDevice ? ' ◀ current' : '';
+    console.log(`  [${i + 1}] ${name}  (${id})${marker}`);
   });
 
-  // Check ffmpeg
-  execFile(WHICH, ['ffmpeg'], (err) => {
-    if (err) {
-      console.log('❌  ffmpeg    — not found');
-      if (IS_WIN) {
-        console.log('     Install: winget install Gyan.FFmpeg\n');
-      } else {
-        console.log('     Install: brew install ffmpeg\n');
+  const autoIdx = devices.findIndex(d => d.id === config.audioDevice);
+
+  if (!process.stdin.isTTY) {
+    console.log(`  audioDevice: ${config.audioDevice || '(not set)'}   (non-interactive — run copilot+ --setup in a terminal to pick)`);
+    console.log('\nHotkeys (inside copilot+):');
+    printHotkeysAndExit(allGood);
+    return;
+  }
+
+  const answer = await promptQuestion(
+    `\nChoose audio device [1-${devices.length}]${autoIdx >= 0 ? ` (Enter = keep current: ${devices[autoIdx].name})` : ''}: `
+  );
+  const trimmed = answer.trim();
+  if (trimmed !== '') {
+    const choice = parseInt(trimmed, 10);
+    if (!isNaN(choice) && choice >= 1 && choice <= devices.length) {
+      const chosen = devices[choice - 1];
+      // Read raw file config so we don't persist auto-detected values
+      let rawConfig = {};
+      try { rawConfig = JSON.parse(fs.readFileSync(cfg.CONFIG_PATH, 'utf8')); } catch {}
+      rawConfig.audioDevice = chosen.id;
+      // Fix stale model path if the saved one no longer exists
+      if (!rawConfig.modelPath || !fs.existsSync(rawConfig.modelPath)) {
+        const found = cfg.findWhisperModel();
+        if (found) rawConfig.modelPath = found;
       }
-      allGood = false;
+      cfg.save(rawConfig);
+      console.log(`✅  Audio device set to: ${chosen.name}  (${chosen.id})\n`);
     } else {
-      console.log('✅  ffmpeg    — found');
+      console.log('⚠️   Invalid choice — audio device unchanged.\n');
     }
-  });
+  } else {
+    console.log(`  Audio device unchanged: ${config.audioDevice}\n`);
+  }
 
-  // Check whisper-cli
-  execFile(WHICH, ['whisper-cli'], (err) => {
-    if (err) {
-      console.log('❌  whisper-cli — not found');
-      if (IS_WIN) {
-        console.log('     Install: https://github.com/ggerganov/whisper.cpp/releases');
-        console.log('     Place whisper-cli.exe somewhere on your PATH\n');
-      } else {
-        console.log('     Install: brew install whisper-cpp');
-        console.log('     Model:   whisper-cpp-download-ggml-model base.en\n');
-      }
-      allGood = false;
-    } else {
-      console.log('✅  whisper-cli — found');
+  console.log('Hotkeys (inside copilot+):');
+  printHotkeysAndExit(allGood);
+}
 
-      const model = cfg.findWhisperModel();
-      if (model) {
-        console.log(`✅  model        — ${model}`);
-      } else {
-        console.log('❌  model        — no model file found');
-        console.log('     Option A: whisper-cpp-download-ggml-model base.en');
-        console.log('     Option B: mkdir -p ~/.copilot/models && curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin -o ~/.copilot/models/ggml-base.en.bin\n');
-        allGood = false;
-      }
-    }
-  });
-
-  // Print config, device picker & hotkey summary after a short delay (so async checks print first)
-  setTimeout(() => {
-    console.log('\n─────────────────────────────────────');
-    console.log('Config:', cfg.CONFIG_PATH);
-    console.log(`  modelPath:      ${config.modelPath || '(not set)'}`);
-    console.log(`  autoSubmit:     ${config.autoSubmit}   (auto-press Enter after transcription)`);
-    console.log(`  voice activation: ${config.wakeWord && config.wakeWord.enabled ? `enabled (phrase: "${config.wakeWord.phrase || 'hey copilot'}")` : 'disabled'}`);
-    const macroCount = Object.values(config.macros).filter(Boolean).length;
-    console.log(`  macros:         ${macroCount}/9 configured`);
-
-    // List available audio input devices and let the user pick
-    const devices = cfg.listMicDevices();
-    if (devices.length === 0) {
-      console.log(`  audioDevice: ${config.audioDevice}   (could not list devices — is ffmpeg installed?)`);
-      console.log('\nHotkeys (inside copilot+):');
-      printHotkeysAndExit(allGood);
-    } else {
-      console.log('\nAvailable audio input devices:');
-      devices.forEach(({ id, name }, i) => {
-        const marker = id === config.audioDevice ? ' ◀ current' : '';
-        console.log(`  [${i + 1}] ${name}  (${id})${marker}`);
-      });
-
-      const autoIdx = devices.findIndex(d => d.id === config.audioDevice);
-
-      // Skip interactive prompt in non-TTY environments (CI, pipes, Homebrew test)
-      if (!process.stdin.isTTY) {
-        console.log(`  audioDevice: ${config.audioDevice || '(not set)'}   (non-interactive — run copilot+ --setup in a terminal to pick)`);
-        console.log('\nHotkeys (inside copilot+):');
-        printHotkeysAndExit(allGood);
+function checkBinary(name, messages) {
+  return new Promise(resolve => {
+    execFile(WHICH, [name], (err) => {
+      if (err) {
+        for (const line of messages.missing) console.log(line);
+        console.log('');
+        resolve(false);
         return;
       }
+      console.log(messages.found);
+      resolve(true);
+    });
+  });
+}
 
-      const rl = require('readline').createInterface({ input: process.stdin, output: process.stdout });
-      rl.question(
-        `\nChoose audio device [1-${devices.length}]${autoIdx >= 0 ? ` (Enter = keep current: ${devices[autoIdx].name})` : ''}: `,
-        (answer) => {
-          rl.close();
-          const trimmed = answer.trim();
-          if (trimmed !== '') {
-            const choice = parseInt(trimmed, 10);
-            if (!isNaN(choice) && choice >= 1 && choice <= devices.length) {
-              const chosen = devices[choice - 1];
-              // Read raw file config so we don't persist auto-detected values
-              let rawConfig = {};
-              try { rawConfig = JSON.parse(fs.readFileSync(cfg.CONFIG_PATH, 'utf8')); } catch {}
-              rawConfig.audioDevice = chosen.id;
-              // Fix stale model path if the saved one no longer exists
-              if (!rawConfig.modelPath || !fs.existsSync(rawConfig.modelPath)) {
-                const found = cfg.findWhisperModel();
-                if (found) rawConfig.modelPath = found;
-              }
-              cfg.save(rawConfig);
-              console.log(`✅  Audio device set to: ${chosen.name}  (${chosen.id})\n`);
-            } else {
-              console.log('⚠️   Invalid choice — audio device unchanged.\n');
-            }
-          } else {
-            console.log(`  Audio device unchanged: ${config.audioDevice}\n`);
-          }
-          console.log('Hotkeys (inside copilot+):');
-          printHotkeysAndExit(allGood);
-        }
-      );
-    }
-  }, 400);
+function promptQuestion(prompt) {
+  const rl = require('readline').createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise(resolve => {
+    rl.question(prompt, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
 }
 
 function printHotkeysAndExit(allGood) {
   console.log('  Ctrl+R  →  Start / stop voice recording');
   console.log('  Ctrl+P  →  Take a screenshot (injected as @path)');
   console.log('  Ctrl+K  →  Open command palette');
+  console.log('  Option+Shift+1–4 / Ctrl+Shift+1–4  →  Switch workhorse models');
+  console.log('  Option+Shift+5 / Ctrl+Shift+5      →  Toggle Auto Mode');
   console.log('  Option+1–9 →  Execute prompt macro (enable "Use Option as Meta Key" in Terminal settings)');
   console.log('  Ctrl+1–9   →  Execute prompt macro (CSI u terminals: kitty, WezTerm)');
   console.log('\nUsage:');

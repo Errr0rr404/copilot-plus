@@ -17,9 +17,11 @@ const fs            = require('fs');
 const os            = require('os');
 const path          = require('path');
 const { execSync }  = require('child_process');
+const { execPowerShellSync } = require('./windows-shell');
 
 const AGENTS_DIR  = path.join(os.homedir(), '.copilot', 'agents');
 const STALE_MS    = 5 * 60 * 1000; // remove dead-process files after 5 min
+const IS_WIN      = os.platform() === 'win32';
 
 function _filePath(pid) {
   return path.join(AGENTS_DIR, `${pid}.json`);
@@ -153,6 +155,8 @@ function _batchCwds(pids) {
  * Returns synthetic agent objects marked with `_native: true`.
  */
 function scanNativeProcesses(knownPids) {
+  if (IS_WIN) return scanNativeProcessesWindows(knownPids);
+
   const selfPid = process.pid;
   const results = [];
 
@@ -216,6 +220,74 @@ function scanNativeProcesses(knownPids) {
       updatedAt:  new Date().toISOString(),
       _native:    true,
       _type:      p.isGh ? 'gh copilot' : 'copilot CLI',
+    });
+  }
+
+  return results;
+}
+
+function scanNativeProcessesWindows(knownPids) {
+  const selfPid = process.pid;
+  const results = [];
+
+  let raw;
+  try {
+    raw = execPowerShellSync(`
+      $ErrorActionPreference = 'Stop'
+      $procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | ForEach-Object {
+        [PSCustomObject]@{
+          pid = $_.ProcessId
+          commandLine = $_.CommandLine
+          startedAt = if ($_.CreationDate) {
+            $_.CreationDate.ToString('o')
+          } else {
+            $null
+          }
+        }
+      }
+      $procs | ConvertTo-Json -Compress
+    `, [], {
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true,
+    });
+  } catch {
+    return results;
+  }
+
+  let processes;
+  try {
+    processes = JSON.parse(raw || '[]');
+  } catch {
+    return results;
+  }
+
+  const rows = Array.isArray(processes) ? processes : [processes];
+  for (const proc of rows) {
+    const pid = Number(proc && proc.pid);
+    const args = String(proc && proc.commandLine || '').trim();
+    if (pid === selfPid)         continue;  // monitor itself
+    if (knownPids.has(pid))      continue;  // already tracked via state file
+    if (args.includes('--monitor')) continue;
+
+    const isBare = /\bcopilot(?:\.cmd|\.exe)?\b/i.test(args) &&
+                   !/copilot\+|copilot-plus/i.test(args);
+    const isGh   = /\bgh(?:\.exe)?\b.*\bcopilot\b/i.test(args);
+
+    if (!isBare && !isGh) continue;
+
+    results.push({
+      pid,
+      cwd:        null,
+      startedAt:  proc.startedAt || null,
+      model:      null,
+      status:     'idle',
+      tokensIn:   0,
+      tokensOut:  0,
+      exchanges:  0,
+      updatedAt:  new Date().toISOString(),
+      _native:    true,
+      _type:      isGh ? 'gh copilot' : 'copilot CLI',
     });
   }
 

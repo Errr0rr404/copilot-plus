@@ -4,6 +4,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { spawnPowerShell } = require('./windows-shell');
 
 const IS_WIN = os.platform() === 'win32';
 const SCREENSHOTS_DIR = path.join(os.tmpdir(), 'copilot-screenshots');
@@ -39,6 +40,11 @@ function captureWindows() {
   const ps = `
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
+    $outPath = $env:COPILOT_PLUS_SCREENSHOT_PATH
+
+    if ([string]::IsNullOrWhiteSpace($outPath)) {
+      throw 'Screenshot output path was not provided.'
+    }
 
     # Clear clipboard first so we can detect a new snip
     [System.Windows.Forms.Clipboard]::Clear()
@@ -60,15 +66,20 @@ function captureWindows() {
     }
 
     if ($img) {
-      $img.Save('${filePath.replace(/\\/g, '\\\\')}')
-      Write-Output '${filePath.replace(/\\/g, '\\\\')}'
+      $img.Save($outPath)
+      Write-Output $outPath
     } else {
       Write-Output ''
     }
   `;
 
   return new Promise((resolve, reject) => {
-    const proc = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps]);
+    const proc = spawnPowerShell(ps, ['-STA'], {
+      env: Object.assign({}, process.env, {
+        COPILOT_PLUS_SCREENSHOT_PATH: filePath,
+      }),
+      windowsHide: true,
+    });
     let output = '';
     proc.stdout.on('data', d => { output += d.toString(); });
     proc.on('error', reject);

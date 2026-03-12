@@ -36,9 +36,8 @@ class VoiceRecorder {
       stdio: ['pipe', 'ignore', 'ignore'],
     });
 
-    this._proc.on('error', err => {
+    this._proc.on('error', () => {
       this._cleanup();
-      throw err;
     });
   }
 

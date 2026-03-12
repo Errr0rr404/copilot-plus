@@ -180,8 +180,12 @@ class WakeWordListener extends EventEmitter {
     const candidates = [
       path.join(os.homedir(), '.copilot', 'models', 'ggml-tiny.en.bin'),
       path.join(os.homedir(), '.copilot', 'models', 'ggml-base.en.bin'),
+      // macOS Homebrew paths
       '/opt/homebrew/share/whisper.cpp/models/ggml-tiny.en.bin',
       '/usr/local/share/whisper.cpp/models/ggml-tiny.en.bin',
+      // Windows common paths
+      path.join(os.homedir(), 'AppData', 'Local', 'whisper.cpp', 'models', 'ggml-tiny.en.bin'),
+      path.join(os.homedir(), 'AppData', 'Local', 'whisper.cpp', 'models', 'ggml-base.en.bin'),
     ];
     return candidates.find(p => fs.existsSync(p)) || null;
   }
