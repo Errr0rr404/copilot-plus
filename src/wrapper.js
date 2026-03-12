@@ -161,6 +161,10 @@ class CopilotWrapper {
       try { shell.resize(process.stdout.columns, process.stdout.rows); } catch {}
     });
 
+    // Disable Win32 Input Mode if active — Windows Terminal may send all key
+    // events as CSI sequences which breaks raw control-code comparisons.
+    if (IS_WIN) process.stdout.write('\x1b[?9001l');
+
     process.stdin.resume();
     if (process.stdin.isTTY && typeof process.stdin.setRawMode === 'function') {
       process.stdin.setRawMode(true);

@@ -10,6 +10,13 @@ const { runOnboarding } = require('../src/onboarding');
 const AgentMonitor = require('../src/monitor');
 
 const IS_WIN = os.platform() === 'win32';
+
+// Disable Win32 Input Mode if active — Windows Terminal sends all key events
+// as escape sequences in this mode, breaking readline and raw input parsing.
+if (IS_WIN && process.stdout.isTTY) {
+  process.stdout.write('\x1b[?9001l');
+}
+
 // `which` on Unix, `where` on Windows
 const WHICH = IS_WIN ? 'where' : 'which';
 

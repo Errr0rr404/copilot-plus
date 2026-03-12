@@ -1,6 +1,6 @@
 {
   "name": "copilot-plus",
-  "version": "1.0.26",
+  "version": "1.0.27",
   "description": "Voice + screenshots + model hotkeys + live agent monitor — drop-in wrapper for GitHub Copilot CLI",
   "bin": {
     "copilot+": "bin/copilot+"

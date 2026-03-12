@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 const CONFIG_PATH = path.join(os.homedir(), '.copilot', 'copilot-plus.json');
 
@@ -57,13 +57,16 @@ function detectMicrophone() {
 }
 
 function detectMicrophoneWindows() {
+  // Use spawnSync so we always capture stderr regardless of exit code.
+  // Some ffmpeg builds on Windows exit 0 for device listing, so
+  // execFileSync's catch-based stderr access doesn't work reliably.
   try {
-    const output = execFileSync('ffmpeg', [
+    const result = spawnSync('ffmpeg', [
       '-f', 'dshow', '-list_devices', 'true', '-i', 'dummy',
     ], { encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] });
-    return parseBestMicWindows(output);
-  } catch (err) {
-    return parseBestMicWindows(err.stderr || '');
+    return parseBestMicWindows(result.stderr || '');
+  } catch {
+    return null;
   }
 }
 
@@ -132,12 +135,12 @@ function parseMicDevicesWindows(output) {
 function listMicDevices() {
   if (os.platform() === 'win32') {
     try {
-      const output = execFileSync('ffmpeg', [
+      const result = spawnSync('ffmpeg', [
         '-f', 'dshow', '-list_devices', 'true', '-i', 'dummy',
       ], { encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] });
-      return parseMicDevicesWindows(output);
-    } catch (err) {
-      return parseMicDevicesWindows(err.stderr || '');
+      return parseMicDevicesWindows(result.stderr || '');
+    } catch {
+      return [];
     }
   } else {
     try {
