@@ -4,8 +4,8 @@
 class CopilotPlus < Formula
   desc "Voice + screenshots + model hotkeys + live agent monitor for GitHub Copilot CLI"
   homepage "https://github.com/Errr0rr404/copilot-plus"
-  url "https://github.com/Errr0rr404/copilot-plus/archive/refs/tags/v1.0.26.tar.gz"
-  sha256 "bf4261fa8573fb856a73ba8fd81123d965c659fccd3280bb51e8bea74b36a261"
+  url "https://github.com/Errr0rr404/copilot-plus/archive/refs/tags/v1.0.27.tar.gz"
+  sha256 "062b7640c284237ebe8ddd1b3e59d9be4bfd328fe342d6e533a1989743f23e1a"
   license "MIT"
 
   depends_on "node"
