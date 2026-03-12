@@ -552,5 +552,16 @@ Make sure you drew a selection in the Snip & Sketch overlay — pressing Escape 
 
 MIT © [Errr0rr404](https://github.com/Errr0rr404)
 
-
 ---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history and upgrade notes.
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for planned features and future direction.
+
+## Contributing
+
+Found a bug or have a feature idea? [Open an issue](https://github.com/Errr0rr404/copilot-plus/issues) — PRs welcome.

@@ -1,16 +1,17 @@
-# copilot+ — Next Feature Proposals
+# copilot+ — Roadmap
 
-## Current State
+> Feature proposals and future direction for copilot-plus.
+> Current version: **v1.0.27** · See [CHANGELOG.md](CHANGELOG.md) for release history.
 
-copilot-plus (v1.0.25, 2k+ downloads in <24hrs) is a drop-in PTY wrapper for GitHub Copilot CLI that adds: voice input (whisper.cpp), screenshots, command palette, workhorse model hotkeys, prompt macros, wake word activation, and a live agent monitor dashboard.
+## Architecture
 
-**Architecture:** Node.js PTY wrapper (`node-pty`) that intercepts stdin/stdout, injects text/commands into the underlying `copilot` process, and coordinates multi-instance state via `~/.copilot/agents/*.json` files.
+Node.js PTY wrapper (`node-pty`) that intercepts stdin/stdout, injects text/commands into the underlying `copilot` process, and coordinates multi-instance state via `~/.copilot/agents/*.json` files.
 
 ## What Copilot CLI Already Provides Natively
 
 `/model`, `/share`, `/usage`, `/clear`, `/compact`, `/context`, `/research`, `/session`, `/cwd`, `/add-dir`, `/mcp`, plan mode, autopilot mode, specialized agents, session export.
 
-## Proposed Features (Copilot CLI does NOT provide these)
+## Proposed Features
 
 ---
 
@@ -258,18 +259,18 @@ steps:
 | 11 | Session/Config Sharing | Low | ⭐⭐⭐ | Team adoption driver |
 | 12 | Sensitive Data Guard | Low-Medium | ⭐⭐⭐⭐ | Enterprise must-have |
 
-## My Top Recommendations (if I were picking)
+## Prioritization
 
-**Quick wins (ship in a day or two):**
+**Quick wins:**
 - #5 Clipboard Integration
 - #6 Multi-Language Voice
 - #9 Quick Shell Commands
 
-**High-impact, medium-effort (flagship features):**
-- #1 Session History & Analytics — this becomes THE reason to use copilot+ over bare copilot
-- #2 Smart Auto-Context — solves the biggest daily pain point
-- #12 Sensitive Data Guard — enterprise unlock
+**Flagship features:**
+- #1 Session History & Analytics
+- #2 Smart Auto-Context
+- #12 Sensitive Data Guard
 
-**Differentiator / viral potential:**
-- #4 Text-to-Speech — "talk to copilot and it talks back" is a demo that sells itself
-- #3 Prompt Workflows — "GitHub Actions for your AI conversations" is a compelling pitch
+**Differentiators:**
+- #4 Text-to-Speech
+- #3 Prompt Workflows

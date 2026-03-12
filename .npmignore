@@ -2,6 +2,7 @@ models/
 Formula/
 .github/
 .gitignore
+ROADMAP.md
 *.wav
 *.png
 .DS_Store
