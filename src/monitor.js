@@ -93,7 +93,8 @@ function fmtNum(n) {
 
 /** Render a compact text progress bar, e.g. "████░░░░░░░░" for pct=33 */
 function _miniBar(pct, width) {
-  const filled = Math.round((pct / 100) * width);
+  const clamped = Math.max(0, Math.min(100, pct));
+  const filled = Math.round((clamped / 100) * width);
   const empty  = width - filled;
   const color  = pct >= 80 ? YELLOW : DIM;
   return `${color}${'█'.repeat(filled)}${'░'.repeat(empty)}${R}`;
