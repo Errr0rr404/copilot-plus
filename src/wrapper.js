@@ -100,7 +100,9 @@ function classifyPrompt(prompt) {
 function resolveBin(name) {
   try {
     const cmd = IS_WIN ? 'where' : 'which';
-    return execFileSync(cmd, [name], { encoding: 'utf8' }).trim().split('\n')[0];
+    // `where` on Windows separates paths with \r\n — split on /\r?\n/ so the
+    // first path doesn't end up with a trailing \r that breaks PTY spawn.
+    return execFileSync(cmd, [name], { encoding: 'utf8' }).trim().split(/\r?\n/)[0];
   } catch {
     return name;
   }

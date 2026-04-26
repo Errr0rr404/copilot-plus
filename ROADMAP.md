@@ -1,7 +1,7 @@
 # copilot+ — Roadmap
 
 > Feature proposals and future direction for copilot-plus.
-> Current version: **v1.0.27** · See [CHANGELOG.md](CHANGELOG.md) for release history.
+> Current version: **v1.0.28** · See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## Architecture
 

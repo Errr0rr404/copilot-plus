@@ -160,8 +160,13 @@ class AgentMonitor {
     }
 
     process.stdout.on('resize', () => this._render());
-    process.on('exit',   () => process.stdout.write(`${E}[?25h${E}[0m\n`));
+    process.on('exit', () => {
+      try { if (process.stdin.isTTY) process.stdin.setRawMode(false); } catch {}
+      process.stdout.write(`${E}[?25h${E}[0m\n`);
+    });
     process.on('SIGTERM', () => process.exit(0));
+    process.on('SIGHUP',  () => process.exit(0));
+    process.on('SIGINT',  () => process.exit(0));
 
     this._render();
     this._refreshQuota();
@@ -311,8 +316,10 @@ class AgentMonitor {
     // ── Footer ────────────────────────────────────────────────────────────────
     lines.push(`${BL}${H.repeat(inner)}${BR}`);
 
-    // Emit — move to top-left then write all lines at once to avoid flicker
-    process.stdout.write(`${E}[H${lines.join('\n')}\n`);
+    // Emit — move to top-left, write all lines at once to avoid flicker, then
+    // clear from cursor to end of screen so leftover content from a previous
+    // (taller) frame doesn't ghost when an agent exits and the box shrinks.
+    process.stdout.write(`${E}[H${lines.join('\n')}\n${E}[J`);
   }
 }
 

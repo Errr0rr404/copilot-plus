@@ -4,6 +4,21 @@ All notable changes to **copilot-plus** are documented here.
 
 ---
 
+## [1.0.28] — 2026-04-26
+
+### Fixed
+
+- **Windows PTY spawn** — `where` separates paths with `\r\n`, so `resolveBin()` returned a path with a trailing `\r` that broke `pty.spawn`. Now splits on `/\r?\n/`.
+- **Voice recorder hang** — if `ffmpeg` died prematurely (mic unplugged, OS denied access) the next `stopAndTranscribe()` would attach an `'exit'` listener after the event already fired and hang forever. `start()` now installs an exit handler, and `stopAndTranscribe()` checks `proc.exitCode`/`signalCode` before awaiting.
+- **`stopAndTranscribe()` race with `-t maxSeconds`** — same hang risk if ffmpeg hit its time cap before we sent `q`. Now wraps `stdin.write`/`kill` in `try/catch` and resolves on the timeout fallback so the wrapper can never hang.
+- **Monitor frame ghosting** — `_render()` only homed the cursor before each frame; when an agent exited and the box shrank, leftover lines from the previous (taller) frame remained on screen. Now appends `\x1b[J` (erase to end of screen) after each render.
+- **Monitor terminal corruption on signal exit** — exit handler restored cursor visibility but not stdin raw mode, leaving the parent terminal broken if the monitor was killed by SIGHUP/SIGINT. Now resets raw mode and registers SIGHUP/SIGINT handlers.
+
+### Removed
+
+- **Dead `dictation.js` module** — `DictationMode` was orphaned after the wake-word rewrite; no code path imported it. Dropped from the npm tarball.
+- **Stale Picovoice entries in `package-lock.json`** — leftover from the v1.0.14 Picovoice → whisper.cpp migration.
+
 ## [1.0.27] — 2025-06-12
 
 ### Fixed

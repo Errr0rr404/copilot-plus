@@ -39,6 +39,12 @@ class VoiceRecorder {
     this._proc.on('error', () => {
       this._cleanup();
     });
+    // Without this, a premature ffmpeg exit (mic unplugged, OS denied access,
+    // etc.) leaves _proc dangling and the next stopAndTranscribe() awaits an
+    // 'exit' event that has already fired — hanging the wrapper.
+    this._proc.on('exit', () => {
+      this._cleanup();
+    });
   }
 
   /**
@@ -123,20 +129,27 @@ class VoiceRecorder {
     this._proc = null;
     this._audioFile = null;
 
-    // Ask ffmpeg to stop gracefully — it finalises the WAV header before exit
-    await new Promise((resolve, reject) => {
-      proc.stdin.write('q');
-      proc.stdin.end();
-      const timer = setTimeout(() => {
-        if (IS_WIN) {
-          spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
-        } else {
-          proc.kill('SIGTERM');
-        }
-      }, 3000);
-      proc.on('exit', () => { clearTimeout(timer); resolve(); });
-      proc.on('error', reject);
-    });
+    // Skip the graceful-stop dance if ffmpeg has already exited — attaching
+    // an 'exit' listener after the event has fired would hang forever.
+    if (proc.exitCode === null && proc.signalCode === null) {
+      // Ask ffmpeg to stop gracefully — it finalises the WAV header before exit
+      await new Promise((resolve) => {
+        try { proc.stdin.write('q'); proc.stdin.end(); } catch {}
+        const finish = () => { clearTimeout(timer); resolve(); };
+        const timer = setTimeout(() => {
+          if (IS_WIN) {
+            spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
+          } else {
+            try { proc.kill('SIGTERM'); } catch {}
+          }
+          // Resolve regardless so we never hang on a stuck process.
+          setTimeout(resolve, 200);
+        }, 3000);
+        proc.once('exit', finish);
+        proc.once('close', finish);
+        proc.once('error', finish);
+      });
+    }
 
     if (!fs.existsSync(audioFile)) {
       throw new Error('Audio file was not created — is the microphone accessible?');
