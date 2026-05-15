@@ -4,6 +4,14 @@ All notable changes to **copilot-plus** are documented here.
 
 ---
 
+## [1.0.29] — 2026-05-15
+
+### Fixed
+
+- **Monitor TUI crash on over-quota state** — `_miniBar()` ran `'░'.repeat(width - filled)` without clamping, so once `q.premium.used > entitlement` (rare but possible on over-quota accounts) the bar threw `RangeError: Invalid count value: -N` and brought down the whole `--monitor` dashboard. Now clamps the percentage to `[0, 100]` before computing the bar.
+- **Monitor quota refresh stuck after a single failure** — `_refreshQuota()` set `_quotaTime = Date.now()` *before* awaiting `fetchQuota()`, so a transient network error or a missing GitHub token froze the quota line for a full 5 minutes before retry. Now resets the timestamp when the fetch returns `null` so the next tick retries.
+- **Postinstall could fail `npm install -g` on locked install locations** — `scripts/postinstall.js` called `fs.chmodSync()` unguarded, so EPERM/EACCES on system-wide npm prefixes or non-owned Homebrew paths aborted the install. Now wraps each chmod in `try/catch` and logs a soft warning; the formula and the brew install path already chmod these files themselves.
+
 ## [1.0.28] — 2026-04-26
 
 ### Fixed
