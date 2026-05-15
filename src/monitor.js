@@ -93,7 +93,10 @@ function fmtNum(n) {
 
 /** Render a compact text progress bar, e.g. "████░░░░░░░░" for pct=33 */
 function _miniBar(pct, width) {
-  const filled = Math.round((pct / 100) * width);
+  // Clamp to [0, 100] so over-quota states (pct > 100) don't throw
+  // RangeError from .repeat(-1) and crash the monitor.
+  const clamped = Math.max(0, Math.min(100, pct));
+  const filled = Math.round((clamped / 100) * width);
   const empty  = width - filled;
   const color  = pct >= 80 ? YELLOW : DIM;
   return `${color}${'█'.repeat(filled)}${'░'.repeat(empty)}${R}`;
@@ -141,7 +144,14 @@ class AgentMonitor {
   _refreshQuota() {
     if (Date.now() - this._quotaTime < QUOTA_MS) return;
     this._quotaTime = Date.now(); // mark as in-flight
-    fetchQuota().then(q => { this._quota = q; }).catch(() => {});
+    fetchQuota()
+      .then(q => {
+        if (q) { this._quota = q; }
+        // fetchQuota returns null on failure (no token, network error, etc.)
+        // Reset so the next tick retries instead of waiting 5 min for nothing.
+        else { this._quotaTime = 0; }
+      })
+      .catch(() => { this._quotaTime = 0; });
   }
 
   start() {

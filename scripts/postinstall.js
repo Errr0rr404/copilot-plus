@@ -27,9 +27,16 @@ const targets = [
 
 let fixed = 0;
 for (const t of targets) {
-  if (fs.existsSync(t)) {
+  if (!fs.existsSync(t)) continue;
+  try {
     fs.chmodSync(t, 0o755);
     fixed++;
+  } catch (err) {
+    // EPERM/EACCES on read-only or non-owned installs (system-wide npm prefix,
+    // Homebrew's libexec, etc.). Don't fail postinstall — the formula and the
+    // Homebrew install path already chmod these files; users on a broken
+    // permissions setup can re-run with sudo or fix the install location.
+    console.warn(`[copilot-plus] chmod ${t} skipped (${err.code || err.message})`);
   }
 }
 
