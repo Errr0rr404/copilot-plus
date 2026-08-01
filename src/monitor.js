@@ -1,39 +1,54 @@
 'use strict';
 
 /**
- * AgentMonitor — full-screen TUI dashboard for copilot+ --monitor.
+ * AgentMonitor — full-screen TUI dashboard for `copilot+ --monitor`.
  *
- * Reads ~/.copilot/agents/<PID>.json files every REFRESH_MS milliseconds,
- * computes display status from timestamps, and renders a live card view.
- * Press q / Q / Ctrl+C / Esc to exit.
+ * Reads ~/.copilot/agents/<PID>.json every REFRESH_MS, computes display
+ * status from timestamps, and renders a live card view.
+ *
+ * Interactive keys:
+ *   ↑ / k          select previous agent
+ *   ↓ / j          select next agent
+ *   /              filter (type, Enter applies, Esc clears)
+ *   s              cycle sort order
+ *   K              send SIGTERM to selected agent (confirm with shift)
+ *   r              refresh quota now
+ *   o              open the selected agent's cwd in a new terminal tab (best-effort)
+ *   ?              toggle inline help
+ *   q / Q / Esc    exit
  */
+
+const fs   = require('fs');
+const os   = require('os');
+const path = require('path');
+const { spawn, spawnSync } = require('child_process');
 
 const agentState = require('./agent-state');
 const { fetchQuota } = require('./copilot-api');
-const os = require('os');
+const theme = require('./theme');
 
 const REFRESH_MS  = 1500;
-const QUOTA_MS    = 5 * 60 * 1000; // refresh quota every 5 min
+const QUOTA_MS    = 5 * 60 * 1000;
 const HOME        = os.homedir();
+const PLATFORM    = os.platform();
+const IS_MAC      = PLATFORM === 'darwin';
+const IS_WIN      = PLATFORM === 'win32';
+
+const SORT_MODES = ['status', 'started', 'activity', 'pid'];
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
 const E      = '\x1b';
 const R      = `${E}[0m`;
 const BOLD   = `${E}[1m`;
 const DIM    = `${E}[2m`;
-const GREEN  = `${E}[32m`;
-const YELLOW = `${E}[33m`;
-const BLUE   = `${E}[34m`;
-const CYAN   = `${E}[36m`;
+const REVERSE = `${E}[7m`;
 
 function stripAnsi(s) {
   return s.replace(/\x1b\[[0-9;]*[mA-Za-z]/g, '');
 }
 
-/** Visible length of a string (ignores ANSI codes, counts emoji as 2). */
 function vlen(s) {
   const plain = stripAnsi(s);
-  // Count wide (emoji / CJK) characters as 2 columns
   let w = 0;
   for (const ch of plain) {
     const cp = ch.codePointAt(0);
@@ -42,20 +57,13 @@ function vlen(s) {
   return w;
 }
 
-/** Pad string to targetWidth based on visible length. */
 function rpad(s, targetWidth) {
   return s + ' '.repeat(Math.max(0, targetWidth - vlen(s)));
 }
 
-/**
- * Truncate an ANSI-coded string so its visible width ≤ max.
- * Walks the string character by character, tracking visible width.
- */
 function truncVis(s, max) {
-  let vis = 0;
-  let i   = 0;
+  let vis = 0, i = 0;
   while (i < s.length) {
-    // Skip ANSI escape sequences
     if (s[i] === '\x1b' && s[i + 1] === '[') {
       const end = s.indexOf('m', i);
       if (end !== -1) { i = end + 1; continue; }
@@ -66,7 +74,7 @@ function truncVis(s, max) {
     vis += w;
     i   += cp > 0xFFFF ? 2 : 1;
   }
-  return s.slice(0, i) + R; // reset at truncation point
+  return s.slice(0, i) + R;
 }
 
 function truncCwd(s, max) {
@@ -91,86 +99,73 @@ function fmtNum(n) {
   return String(n);
 }
 
-/** Render a compact text progress bar, e.g. "████░░░░░░░░" for pct=33 */
-function _miniBar(pct, width) {
-  // Clamp to [0, 100] so over-quota states (pct > 100) don't throw
-  // RangeError from .repeat(-1) and crash the monitor.
+function _miniBar(pct, width, t) {
   const clamped = Math.max(0, Math.min(100, pct));
   const filled = Math.round((clamped / 100) * width);
   const empty  = width - filled;
-  const color  = pct >= 80 ? YELLOW : DIM;
-  return `${color}${'█'.repeat(filled)}${'░'.repeat(empty)}${R}`;
+  const color  = pct >= 80 ? t.quota_hi : t.quota_ok;
+  return `${color}${'█'.repeat(filled)}${'░'.repeat(empty)}${t.reset}`;
 }
 
-// ── Display status (computed from live timestamps + status field) ─────────────
-function displayStatus(agent) {
-  if (agent.status === 'recording')    return { label: 'RECORDING',    color: BLUE,            bullet: '🎙' };
-  if (agent.status === 'transcribing') return { label: 'TRANSCRIBING', color: CYAN,            bullet: '⏳' };
-  if (agent.status === 'done')         return { label: 'DONE',         color: DIM,             bullet: '✓ ' };
+function displayStatus(agent, t) {
+  if (agent.status === 'recording')    return { label: 'RECORDING',    color: t.info,                 bullet: '🎙' };
+  if (agent.status === 'transcribing') return { label: 'TRANSCRIBING', color: t.accent,               bullet: '⏳' };
+  if (agent.status === 'done')         return { label: 'DONE',         color: t.dim,                  bullet: '✓ ' };
 
-  // Attention: copilot responded but user hasn't typed in >30 s
   if (agent.lastOutputAt && agent.lastInputAt) {
     const outTime  = new Date(agent.lastOutputAt);
     const inTime   = new Date(agent.lastInputAt);
-    const outAgeMs = Date.now() - outTime.getTime();
-    if (outTime > inTime && outAgeMs > 30_000) {
-      return { label: 'ATTENTION', color: `${BOLD}${YELLOW}`, bullet: '⚠ ' };
+    if (outTime > inTime && Date.now() - outTime.getTime() > 30_000) {
+      return { label: 'ATTENTION', color: `${BOLD}${t.warn}`, bullet: '⚠ ' };
     }
   }
-
-  // Thinking: user last submitted but no output yet (or output is older than input)
   if (agent.lastInputAt) {
     const inTime  = new Date(agent.lastInputAt);
     const outTime = agent.lastOutputAt ? new Date(agent.lastOutputAt) : null;
     if (!outTime || inTime > outTime) {
       const inputAgeMs = Date.now() - inTime.getTime();
-      if (inputAgeMs < 120_000) {
-        return { label: 'THINKING', color: CYAN, bullet: '💭' };
-      }
+      if (inputAgeMs < 120_000) return { label: 'THINKING', color: t.accent, bullet: '💭' };
     }
   }
-
-  return { label: 'IDLE', color: GREEN, bullet: '● ' };
+  return { label: 'IDLE', color: t.success, bullet: '● ' };
 }
 
-// ── AgentMonitor class ────────────────────────────────────────────────────────
+// ── AgentMonitor ──────────────────────────────────────────────────────────────
 class AgentMonitor {
-  constructor() {
+  constructor(opts = {}) {
     this._timer      = null;
-    this._quota      = null;   // cached quota from GitHub API
+    this._quota      = null;
     this._quotaTime  = 0;
+    this._cfg        = opts.cfg || {};
+    this._selectedPid = null;
+    this._sortMode    = 'status';
+    this._filter      = '';
+    this._inFilter    = false;
+    this._showHelp    = false;
+    this._lastAgents  = [];
+    this._renderedRows = 0;
+    this._notice      = null; // transient status string, cleared on next render
   }
 
-  _refreshQuota() {
-    if (Date.now() - this._quotaTime < QUOTA_MS) return;
-    this._quotaTime = Date.now(); // mark as in-flight
+  _refreshQuota(force = false) {
+    if (!force && Date.now() - this._quotaTime < QUOTA_MS) return;
+    this._quotaTime = Date.now();
     fetchQuota()
-      .then(q => {
-        if (q) { this._quota = q; }
-        // fetchQuota returns null on failure (no token, network error, etc.)
-        // Reset so the next tick retries instead of waiting 5 min for nothing.
-        else { this._quotaTime = 0; }
-      })
+      .then(q => { if (q) this._quota = q; else this._quotaTime = 0; })
       .catch(() => { this._quotaTime = 0; });
   }
 
   start() {
-    // Hide cursor, clear screen
     process.stdout.write(`${E}[?25l${E}[2J`);
 
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(true);
       process.stdin.resume();
-      process.stdin.on('data', data => {
-        const s = data.toString();
-        if (s === 'q' || s === 'Q' || s === '\x03' || s === '\x1b') {
-          process.exit(0);
-        }
-      });
+      process.stdin.on('data', data => this._handleKey(data));
     }
 
     process.stdout.on('resize', () => this._render());
-    process.on('exit', () => {
+    process.on('exit',  () => {
       try { if (process.stdin.isTTY) process.stdin.setRawMode(false); } catch {}
       process.stdout.write(`${E}[?25h${E}[0m\n`);
     });
@@ -183,122 +178,242 @@ class AgentMonitor {
     this._timer = setInterval(() => { this._render(); this._refreshQuota(); }, REFRESH_MS);
   }
 
+  // ── Input ──────────────────────────────────────────────────────────────────
+
+  _handleKey(data) {
+    const s = data.toString();
+
+    if (this._inFilter) {
+      if (s === '\x1b') { this._filter = ''; this._inFilter = false; this._render(); return; }
+      if (s === '\r' || s === '\n') { this._inFilter = false; this._render(); return; }
+      if (s === '\x7f' || s === '\x08') { this._filter = this._filter.slice(0, -1); this._render(); return; }
+      if (s === '\x03') { process.exit(0); }
+      if (s.length === 1 && s.charCodeAt(0) >= 32 && s.charCodeAt(0) < 127) {
+        this._filter += s; this._render(); return;
+      }
+      return;
+    }
+
+    if (s === 'q' || s === 'Q' || s === '\x03' || s === '\x1b') process.exit(0);
+
+    if (s === 'j' || s === '\x1b[B') { this._move(+1); return; }
+    if (s === 'k' || s === '\x1b[A') { this._move(-1); return; }
+
+    if (s === '/') { this._inFilter = true; this._filter = ''; this._render(); return; }
+    if (s === 's') { this._sortMode = SORT_MODES[(SORT_MODES.indexOf(this._sortMode) + 1) % SORT_MODES.length]; this._notice = `sort: ${this._sortMode}`; this._render(); return; }
+    if (s === 'r') { this._refreshQuota(true); this._notice = 'quota refresh requested'; this._render(); return; }
+    if (s === '?') { this._showHelp = !this._showHelp; this._render(); return; }
+    if (s === 'K') { this._killSelected(); return; }
+    if (s === 'o') { this._openSelected(); return; }
+    if (s === '\r' || s === '\n') { this._showSelectedDetail(); return; }
+  }
+
+  _move(delta) {
+    const list = this._lastAgents;
+    if (!list.length) return;
+    let idx = list.findIndex(a => a.pid === this._selectedPid);
+    if (idx === -1) idx = 0;
+    idx = Math.max(0, Math.min(list.length - 1, idx + delta));
+    this._selectedPid = list[idx].pid;
+    this._render();
+  }
+
+  _killSelected() {
+    if (!this._selectedPid) { this._notice = 'no agent selected'; this._render(); return; }
+    try {
+      process.kill(this._selectedPid, 'SIGTERM');
+      this._notice = `sent SIGTERM to pid ${this._selectedPid}`;
+    } catch (err) {
+      this._notice = `kill failed: ${err.code || err.message}`;
+    }
+    this._render();
+  }
+
+  _openSelected() {
+    const sel = (this._lastAgents || []).find(a => a.pid === this._selectedPid);
+    if (!sel || !sel.cwd) { this._notice = 'no cwd to open'; this._render(); return; }
+    try {
+      if (IS_MAC) {
+        // Open a new Terminal.app tab cd'd into the cwd
+        const script = `tell application "Terminal" to do script "cd '${sel.cwd.replace(/'/g, "'\\''")}' && copilot+"`;
+        spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' }).unref();
+      } else if (IS_WIN) {
+        spawn('wt', ['-d', sel.cwd], { detached: true, stdio: 'ignore' }).unref();
+      } else {
+        // Linux best-effort
+        for (const term of ['gnome-terminal', 'konsole', 'xterm']) {
+          if (spawnSync('which', [term]).status === 0) {
+            spawn(term, ['--working-directory=' + sel.cwd], { detached: true, stdio: 'ignore' }).unref();
+            break;
+          }
+        }
+      }
+      this._notice = `opening ${sel.cwd}`;
+    } catch (err) {
+      this._notice = `open failed: ${err.code || err.message}`;
+    }
+    this._render();
+  }
+
+  _showSelectedDetail() {
+    // Toggle help on Enter for now — detail panel is a future iteration.
+    this._showHelp = true;
+    this._render();
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  _sortAgents(agents) {
+    const order = { recording: 0, transcribing: 1, idle: 2, done: 3 };
+    const m = this._sortMode;
+    const copy = [...agents];
+    if (m === 'status') {
+      copy.sort((a, b) => (order[a.status] ?? 2) - (order[b.status] ?? 2));
+    } else if (m === 'started') {
+      copy.sort((a, b) => new Date(a.startedAt || 0) - new Date(b.startedAt || 0));
+    } else if (m === 'activity') {
+      copy.sort((a, b) =>
+        new Date(b.lastOutputAt || b.lastInputAt || 0) - new Date(a.lastOutputAt || a.lastInputAt || 0));
+    } else if (m === 'pid') {
+      copy.sort((a, b) => (a.pid || 0) - (b.pid || 0));
+    }
+    return copy;
+  }
+
+  _filterAgents(agents) {
+    if (!this._filter) return agents;
+    const q = this._filter.toLowerCase();
+    return agents.filter(a =>
+      String(a.pid || '').includes(q)
+      || (a.cwd   || '').toLowerCase().includes(q)
+      || (a.model || '').toLowerCase().includes(q)
+      || (a.status|| '').toLowerCase().includes(q)
+    );
+  }
+
   _render() {
+    const t = theme.get(this._cfg);
     const cols   = process.stdout.columns || 80;
     const w      = Math.max(64, Math.min(cols, 110));
     const inner  = w - 2;
 
-    const agents   = agentState.readAll();
-    const enriched = agents.map(a => ({ ...a, ds: displayStatus(a) }));
+    let agents   = agentState.readAll();
+    agents = this._sortAgents(this._filterAgents(agents));
+    this._lastAgents = agents;
+
+    // Ensure selectedPid is valid
+    if (this._selectedPid && !agents.find(a => a.pid === this._selectedPid)) {
+      this._selectedPid = agents[0] ? agents[0].pid : null;
+    } else if (!this._selectedPid && agents[0]) {
+      this._selectedPid = agents[0].pid;
+    }
+
+    const enriched = agents.map(a => ({ ...a, ds: displayStatus(a, t) }));
 
     const attentionCount = enriched.filter(a => a.ds.label === 'ATTENTION').length;
     const activeCount    = enriched.filter(a => a.status !== 'done').length;
     const doneCount      = enriched.filter(a => a.status === 'done').length;
 
-    // Box chars
-    const H = '─', V = '│', TL = '╭', TR = '╮', BL = '╰', BR = '╯';
-    const ML = '├', MR = '┤';
-
+    const H = '─', V = '│', TL = '╭', TR = '╮', BL = '╰', BR = '╯', ML = '├', MR = '┤';
     const lines = [];
 
-    // ── Header ────────────────────────────────────────────────────────────────
+    // Header
     const titleTxt = ' copilot+ monitor ';
-    const tPadL = Math.floor((inner - titleTxt.length) / 2);
-    const tPadR = inner - titleTxt.length - tPadL;
+    const tPadL = Math.max(0, Math.floor((inner - titleTxt.length) / 2));
+    const tPadR = Math.max(0, inner - titleTxt.length - tPadL);
     lines.push(`${TL}${H.repeat(tPadL)}${BOLD}${titleTxt}${R}${H.repeat(tPadR)}${TR}`);
 
-    // ── Summary bar (agents left, quota right) ────────────────────────────────
+    // Summary
     let summaryL;
     if (agents.length === 0) {
-      summaryL = `  ${DIM}no agents running${R}`;
+      summaryL = `  ${t.dim}no agents running${t.reset}`;
     } else {
       const parts = [];
       if (activeCount)    parts.push(`${BOLD}${activeCount} active${R}`);
-      if (attentionCount) parts.push(`${BOLD}${YELLOW}${attentionCount} need attention${R}`);
-      if (doneCount)      parts.push(`${DIM}${doneCount} done${R}`);
-      summaryL = `  ${parts.join(`  ${DIM}·${R}  `)}`;
+      if (attentionCount) parts.push(`${BOLD}${t.warn}${attentionCount} need attention${t.reset}`);
+      if (doneCount)      parts.push(`${t.dim}${doneCount} done${t.reset}`);
+      summaryL = `  ${parts.join(`  ${t.dim}·${t.reset}  `)}`;
     }
-    const now       = new Date().toLocaleTimeString();
-    const summaryR  = `${DIM}updates every ${REFRESH_MS / 1000}s  ·  ${now}  ·  q quit${R}  `;
-    const gapWidth  = inner - vlen(summaryL) - vlen(summaryR);
-    lines.push(`${V}${summaryL}${' '.repeat(Math.max(0, gapWidth))}${summaryR}${V}`);
+    const now      = new Date().toLocaleTimeString();
+    const sortBadge = `${t.dim}sort:${t.reset}${this._sortMode}`;
+    const filterBadge = this._filter || this._inFilter
+      ? `  ${t.dim}/${t.reset}${this._filter}${this._inFilter ? '_' : ''}`
+      : '';
+    const summaryR = `${t.dim}${sortBadge}  ·  ${now}  ·  ? help${t.reset}${filterBadge}  `;
+    const gap = inner - vlen(summaryL) - vlen(summaryR);
+    lines.push(`${V}${summaryL}${' '.repeat(Math.max(0, gap))}${summaryR}${V}`);
 
-    // ── Quota bar ─────────────────────────────────────────────────────────────
+    // Quota
     const q = this._quota;
     if (q) {
       const planLabel = q.plan.replace(/_/g, ' ');
       let quotaStr;
       if (q.premium.unlimited) {
-        quotaStr = `${DIM}${planLabel}  ·  premium requests: unlimited${R}`;
+        quotaStr = `${t.dim}${planLabel}  ·  premium requests: unlimited${t.reset}`;
       } else if (q.premium.used !== null) {
         const pct  = Math.round(100 * q.premium.used / (q.premium.entitlement || 1));
-        const bar  = _miniBar(pct, 12);
+        const bar  = _miniBar(pct, 12, t);
         const reset = q.resetDate ? `  resets ${q.resetDate}` : '';
-        quotaStr = `${DIM}${planLabel}  ·  ${R}${BOLD}${q.premium.used}${R}${DIM}/${q.premium.entitlement} premium req  ${bar}${reset}${R}`;
+        quotaStr = `${t.dim}${planLabel}  ·  ${t.reset}${BOLD}${q.premium.used}${R}${t.dim}/${q.premium.entitlement} premium req  ${bar}${reset}${t.reset}`;
       } else {
-        quotaStr = `${DIM}${planLabel}${R}`;
+        quotaStr = `${t.dim}${planLabel}${t.reset}`;
       }
-      const qLine = `  ${quotaStr}`;
-      lines.push(`${V}${rpad(qLine, inner)}${V}`);
+      lines.push(`${V}${rpad(`  ${quotaStr}`, inner)}${V}`);
     }
 
-    // ── Agent cards ───────────────────────────────────────────────────────────
+    // Cards
     if (agents.length === 0) {
       lines.push(`${ML}${H.repeat(inner)}${MR}`);
-      const msg = `${DIM}  No copilot+ agents detected. Start one with: copilot+${R}`;
+      const msg = `${t.dim}  No copilot+ agents detected. Start one with: copilot+${t.reset}`;
       lines.push(`${V}${rpad(msg, inner)}${V}`);
       lines.push(`${V}${' '.repeat(inner)}${V}`);
     } else {
       for (let i = 0; i < enriched.length; i++) {
         const a   = enriched[i];
         const ds  = a.ds;
+        const isSel = a.pid === this._selectedPid;
 
-        // Separator between cards — dashed for same-status group, solid between groups
         const sep = (i === 0 || enriched[i - 1].ds.label !== ds.label)
           ? `${ML}${H.repeat(inner)}${MR}`
-          : `${ML}${DIM}${' ─'.repeat(Math.ceil(inner / 2)).slice(0, inner)}${R}${MR}`;
+          : `${ML}${t.dim}${' ─'.repeat(Math.ceil(inner / 2)).slice(0, inner)}${t.reset}${MR}`;
         lines.push(sep);
 
-        // ── Card line 1: bullet + status + pid + model/type + cwd ───────────
-        // Column widths (visible)
-        const STATUS_W = 14;  // "TRANSCRIBING" is 12 chars
+        const STATUS_W = 14;
         const PID_W    = 7;
         const MODEL_W  = 24;
-        // cwd gets the remainder
         const CWD_W = Math.max(10, inner - 2 - STATUS_W - 2 - PID_W - 2 - MODEL_W - 2);
 
+        const arrow = isSel ? `${t.accent}${BOLD}▶${t.reset} ` : '  ';
         const statusPlain = `${ds.bullet} ${ds.label}`;
-        const statusFmt   = `${ds.color}${BOLD}${ds.bullet} ${ds.label}${R}`;
-        const pidFmt      = `${DIM}pid${R} ${a.pid || '?'}`;
+        const statusFmt   = `${ds.color}${BOLD}${ds.bullet} ${ds.label}${t.reset}`;
+        const pidFmt      = `${t.dim}pid${t.reset} ${a.pid || '?'}`;
 
-        // Native (unmanaged) processes show their type tag; managed show model name
         let modelRaw;
         if (a._native) {
-          modelRaw = `${DIM}[${a._type || 'copilot CLI'}]${R}`;
+          modelRaw = `${t.dim}[${a._type || 'copilot CLI'}]${t.reset}`;
         } else if (a.model) {
           modelRaw = truncCwd(a.model, MODEL_W);
         } else {
-          modelRaw = `${DIM}unknown${R}`;
+          modelRaw = `${t.dim}unknown${t.reset}`;
         }
         const modelFmt = rpad(modelRaw, MODEL_W + (vlen(modelRaw) - vlen(stripAnsi(modelRaw))));
-        const cwdFmt   = `${DIM}${truncCwd(a.cwd || '', CWD_W)}${R}`;
+        const cwdFmt   = `${t.dim}${truncCwd(a.cwd || '', CWD_W)}${t.reset}`;
 
-        const line1 = `  ${rpad(statusFmt, STATUS_W + (vlen(statusFmt) - vlen(statusPlain)))}` +
+        const line1 = `${arrow}${rpad(statusFmt, STATUS_W + (vlen(statusFmt) - vlen(statusPlain)))}` +
                       `  ${pidFmt}  ${modelFmt}  ${cwdFmt}`;
-        lines.push(`${V}${rpad(line1, inner)}${V}`);
+        const open  = isSel ? REVERSE : '';
+        const close = isSel ? R       : '';
+        lines.push(`${V}${open}${rpad(line1, inner)}${close}${V}`);
 
-        // ── Card line 2: requests + timing ───────────────────────────────
-        // Token counts aren't exposed by the CLI, so we show exchange count instead
         let reqStr;
         if (a.tokensIn || a.tokensOut) {
-          // Future-proof: if token data ever appears, show it
           reqStr = `↑ ${rpad(fmtNum(a.tokensIn), 5)} ↓ ${rpad(fmtNum(a.tokensOut), 5)} tok`;
         } else if (a._native) {
-          reqStr = `${DIM}[unmanaged – no stats]${R}  `;
+          reqStr = `${t.dim}[unmanaged – no stats]${t.reset}  `;
         } else if (a.exchanges) {
-          reqStr = `${BOLD}${a.exchanges}${R}${DIM} premium req${R}              `;
+          reqStr = `${BOLD}${a.exchanges}${R}${t.dim} premium req${t.reset}              `;
         } else {
-          reqStr = `${DIM}0 requests so far${R}          `;
+          reqStr = `${t.dim}0 requests so far${t.reset}          `;
         }
 
         const timeParts = [];
@@ -311,25 +426,35 @@ class AgentMonitor {
             : '';
         if (lastTime) timeParts.push(lastTime);
 
-        const timeFmt  = `${DIM}${timeParts.join(`  ·  `)}${R}`;
+        const timeFmt  = `${t.dim}${timeParts.join('  ·  ')}${t.reset}`;
         const indent   = ' '.repeat(2 + STATUS_W);
         const line2raw = `${indent}${reqStr}  ${timeFmt}`;
-
-        // Truncate line2 to inner width if needed (protects box alignment)
-        const line2 = vlen(line2raw) > inner
-          ? truncVis(line2raw, inner)
-          : line2raw;
+        const line2 = vlen(line2raw) > inner ? truncVis(line2raw, inner) : line2raw;
         lines.push(`${V}${rpad(line2, inner)}${V}`);
       }
     }
 
-    // ── Footer ────────────────────────────────────────────────────────────────
+    // Notice / help
+    if (this._notice) {
+      lines.push(`${V}${rpad(`  ${t.accent}${this._notice}${t.reset}`, inner)}${V}`);
+      this._notice = null;
+    }
+
+    if (this._showHelp) {
+      lines.push(`${ML}${H.repeat(inner)}${MR}`);
+      const helpLines = [
+        '  j/k ↑↓ navigate    /  filter     s  cycle sort',
+        '  o  open cwd        K  SIGTERM    r  refresh quota',
+        '  ? toggle help      q  quit',
+      ];
+      for (const l of helpLines) lines.push(`${V}${rpad(`${t.dim}${l}${t.reset}`, inner)}${V}`);
+    }
+
     lines.push(`${BL}${H.repeat(inner)}${BR}`);
 
-    // Emit — move to top-left, write all lines at once to avoid flicker, then
-    // clear from cursor to end of screen so leftover content from a previous
-    // (taller) frame doesn't ghost when an agent exits and the box shrinks.
+    // Emit
     process.stdout.write(`${E}[H${lines.join('\n')}\n${E}[J`);
+    this._renderedRows = lines.length;
   }
 }
 

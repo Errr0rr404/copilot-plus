@@ -6,7 +6,22 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const IS_WIN = os.platform() === 'win32';
+const PLATFORM = os.platform();
+const IS_WIN   = PLATFORM === 'win32';
+const IS_MAC   = PLATFORM === 'darwin';
+
+/** Build ffmpeg input args for the current platform. Mirrors voice.js. */
+function _inputArgs(device) {
+  if (IS_WIN) return ['-f', 'dshow', '-i', `audio=${device}`];
+  if (IS_MAC) return ['-f', 'avfoundation', '-i', device];
+  if (typeof device === 'string' && device.startsWith('alsa:')) {
+    return ['-f', 'alsa', '-i', device.slice('alsa:'.length)];
+  }
+  const src = (typeof device === 'string' && device.startsWith('pulse:'))
+    ? device.slice('pulse:'.length)
+    : (device || 'default');
+  return ['-f', 'pulse', '-i', src];
+}
 
 /** Levenshtein edit distance between two strings. */
 function _editDistance(a, b) {
@@ -100,9 +115,10 @@ class WakeWordListener extends EventEmitter {
 
   _record(audioFile, seconds) {
     return new Promise((resolve, reject) => {
-      const args = IS_WIN
-        ? ['-f', 'dshow', '-i', `audio=${this.config.audioDevice}`, '-t', String(seconds), '-ar', '16000', '-ac', '1', '-y', audioFile]
-        : ['-f', 'avfoundation', '-i', this.config.audioDevice, '-t', String(seconds), '-ar', '16000', '-ac', '1', '-y', audioFile];
+      const args = [
+        ..._inputArgs(this.config.audioDevice),
+        '-t', String(seconds), '-ar', '16000', '-ac', '1', '-y', audioFile,
+      ];
 
       const proc = spawn('ffmpeg', args, { stdio: ['pipe', 'ignore', 'ignore'] });
       this._ffmpeg = proc;

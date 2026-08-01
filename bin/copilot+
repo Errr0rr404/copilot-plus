@@ -2,43 +2,59 @@
 'use strict';
 
 const { execFile } = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const cfg = require('../src/config');
+const fs   = require('fs');
+const os   = require('os');
+const path = require('path');
+
+const cfg   = require('../src/config');
+const theme = require('../src/theme');
+const logger = require('../src/logger');
 const CopilotWrapper = require('../src/wrapper');
 const { runOnboarding } = require('../src/onboarding');
 const AgentMonitor = require('../src/monitor');
+const history = require('../src/history');
+const bookmarks = require('../src/bookmarks');
+const configShare = require('../src/config-share');
+const usageMeter = require('../src/usage-meter');
+const workflows = require('../src/workflows');
+const worktree = require('../src/worktree');
+const { fetchQuota } = require('../src/copilot-api');
 
 const IS_WIN = os.platform() === 'win32';
+const WHICH  = IS_WIN ? 'where' : 'which';
+const VERSION = require('../package.json').version;
 
-// Disable Win32 Input Mode if active — Windows Terminal sends all key events
-// as escape sequences in this mode, breaking readline and raw input parsing.
-if (IS_WIN && process.stdout.isTTY) {
-  process.stdout.write('\x1b[?9001l');
+// Disable Win32 Input Mode (sends keys as CSI sequences and breaks raw input)
+if (IS_WIN && process.stdout.isTTY) process.stdout.write('\x1b[?9001l');
+
+const ARGV = process.argv.slice(2);
+const has  = flag => ARGV.includes(flag);
+
+// ── Flag dispatch ────────────────────────────────────────────────────────────
+if (has('--version') || has('-V')) {
+  console.log(`copilot-plus v${VERSION}`);
+  process.exit(0);
 }
 
-// `which` on Unix, `where` on Windows
-const WHICH = IS_WIN ? 'where' : 'which';
+if (has('--help-plus') || has('-h')) {
+  printHelp();
+  process.exit(0);
+}
 
-// ─── Monitor mode ──────────────────────────────────────────────────────────────
-if (process.argv.includes('--monitor')) {
-  const monitor = new AgentMonitor();
+if (has('--monitor')) {
+  const monitor = new AgentMonitor({ cfg: cfg.load() });
   monitor.start();
-  return; // keep process alive (setInterval inside monitor.start())
-}
-
-// ─── Setup mode ────────────────────────────────────────────────────────────────
-if (process.argv.includes('--setup')) {
-  runSetup().catch(err => {
-    console.error('Error:', err.message);
-    process.exit(1);
-  });
   return;
 }
 
-// ─── Preferences mode ──────────────────────────────────────────────────────────
-if (process.argv.includes('--preferences')) {
+if (has('--setup')) {
+  runSetup().catch(err => { console.error('Error:', err.message); process.exit(1); });
+  return;
+}
+
+if (has('--preferences')) {
   const config = cfg.load();
+  theme.set(config.theme || 'dark');
   runOnboarding(config).then(() => process.exit(0)).catch(err => {
     console.error('Error:', err.message);
     process.exit(1);
@@ -46,57 +62,366 @@ if (process.argv.includes('--preferences')) {
   return;
 }
 
-// ─── Normal mode ───────────────────────────────────────────────────────────────
+if (has('--doctor')) {
+  runDoctor();
+  return;
+}
+
+if (has('--history')) {
+  runHistory();
+  return;
+}
+
+if (has('--snippets') || has('--bookmarks')) {
+  runSnippets();
+  return;
+}
+
+if (has('--ask')) {
+  runAsk();
+  return;
+}
+
+if (has('--export-config')) {
+  runExportConfig();
+  return;
+}
+
+if (has('--import-config')) {
+  runImportConfig();
+  return;
+}
+
+if (has('--usage')) {
+  runUsage().catch(err => { console.error('Error:', err.message); process.exit(1); });
+  return;
+}
+
+if (has('--workflows')) {
+  runWorkflowsList();
+  return;
+}
+
+if (has('--worktree')) {
+  runWorktree();
+  return;
+}
+
+// ── Normal mode ──────────────────────────────────────────────────────────────
 (async () => {
   let config = cfg.load();
-  const args = process.argv.slice(2);
+  theme.set(config.theme || 'dark');
+  const warns = cfg.validate(config);
+  for (const w of warns) console.warn(`\x1b[33m[copilot+] config warning:\x1b[0m ${w}`);
 
-  // First-run onboarding
   if (!config.firstRunComplete && process.stdin.isTTY) {
     config = await runOnboarding(config);
   }
-
-  const wrapper = new CopilotWrapper(args, config);
+  const wrapper = new CopilotWrapper(ARGV, config);
   wrapper.start();
 })().catch(err => {
+  logger.error('startup failed:', err);
   console.error('Error:', err.message);
   process.exit(1);
 });
 
-// ─── Setup helper ──────────────────────────────────────────────────────────────
+// ── Help text ───────────────────────────────────────────────────────────────
+function printHelp() {
+  const t = theme.get(cfg.load());
+  console.log(`\n${t.bold}copilot+${t.reset} ${t.dim}v${VERSION}${t.reset}`);
+  console.log(`${t.dim}Voice + screenshots + model hotkeys + live monitor — drop-in wrapper for GitHub Copilot CLI.${t.reset}\n`);
+  console.log(`${t.bold}USAGE${t.reset}`);
+  console.log(`  copilot+                    launch with all enhancements`);
+  console.log(`  copilot+ --monitor          live multi-session dashboard`);
+  console.log(`  copilot+ --history [query]  search past prompts`);
+  console.log(`  copilot+ --snippets         browse bookmarked responses`);
+  console.log(`  copilot+ --usage            local + premium usage summary`);
+  console.log(`  copilot+ --workflows        list prompt workflow chains`);
+  console.log(`  copilot+ --worktree [name]  create isolated git worktree`);
+  console.log(`  copilot+ --export-config [file]   shareable config package`);
+  console.log(`  copilot+ --import-config <file>   apply package (add --overwrite)`);
+  console.log(`  copilot+ --ask "question"   one-shot non-interactive query`);
+  console.log(`  copilot+ --setup            check dependencies + pick mic`);
+  console.log(`  copilot+ --preferences      re-run the onboarding wizard`);
+  console.log(`  copilot+ --doctor           validate config and environment`);
+  console.log(`  copilot+ --version          print version and exit`);
+  console.log(`  copilot+ --help-plus / -h   print this help (use --help to forward to copilot)\n`);
+  console.log(`${t.bold}HOTKEYS${t.reset} (inside copilot+)`);
+  console.log(`  ${t.bold}?${t.reset}                  show in-app cheatsheet`);
+  console.log(`  Ctrl+K             open command palette`);
+  console.log(`  Ctrl+R             start/stop voice recording`);
+  console.log(`  Ctrl+P             screenshot`);
+  console.log(`  Ctrl+Y             paste clipboard (text or image)`);
+  console.log(`  Ctrl+G             inject smart context (git diff, recent files)`);
+  console.log(`  Ctrl+O             attach file as @path`);
+  console.log(`  Ctrl+S             stash current prompt draft`);
+  console.log(`  Ctrl+E             open last response in $EDITOR`);
+  console.log(`  Ctrl+T             toggle text-to-speech`);
+  console.log(`  Ctrl+B             bookmark last response`);
+  console.log(`  Enter (busy)       queue prompt while agent is responding`);
+  console.log(`  ${IS_WIN ? 'Ctrl+Shift' : 'Opt+⇧'}+1–4    switch workhorse model 1–4`);
+  console.log(`  ${IS_WIN ? 'Ctrl+Shift' : 'Opt+⇧'}+5      toggle ⚡ Auto Mode`);
+  console.log(`  ${IS_WIN ? 'Ctrl' : 'Opt'}+1–9         run macro 1–9`);
+  console.log(`  !cmd               run shell command, inject output as context\n`);
+  console.log(`${t.bold}DOCS${t.reset}     https://github.com/Errr0rr404/copilot-plus`);
+  console.log(`${t.bold}ISSUES${t.reset}   https://github.com/Errr0rr404/copilot-plus/issues\n`);
+}
+
+function runExportConfig() {
+  const config = cfg.load();
+  const idx = ARGV.indexOf('--export-config');
+  const dest = ARGV[idx + 1] && !ARGV[idx + 1].startsWith('-') ? ARGV[idx + 1] : null;
+  try {
+    const res = configShare.exportToFile(config, dest, { includeWorkflows: true });
+    console.log(`Exported config package → ${res.path}`);
+    process.exit(0);
+  } catch (err) {
+    console.error('Export failed:', err.message);
+    process.exit(1);
+  }
+}
+
+function runImportConfig() {
+  const idx = ARGV.indexOf('--import-config');
+  const file = ARGV[idx + 1];
+  if (!file || file.startsWith('-')) {
+    console.error('usage: copilot+ --import-config <file> [--overwrite]');
+    process.exit(1);
+  }
+  const overwrite = ARGV.includes('--overwrite');
+  try {
+    const current = cfg.load();
+    const res = configShare.importFromFile(file, current, { overwrite });
+    cfg.patch(res.patch);
+    console.log(`Imported config from ${file}${overwrite ? ' (overwrite)' : ' (merge)'}`);
+    if (res.workflowsWritten.length) {
+      console.log(`Workflows written: ${res.workflowsWritten.join(', ')}`);
+    }
+    process.exit(0);
+  } catch (err) {
+    console.error('Import failed:', err.message);
+    process.exit(1);
+  }
+}
+
+async function runUsage() {
+  const config = cfg.load();
+  theme.set(config.theme || 'dark');
+  const t = theme.get(config);
+  let quota = null;
+  try { quota = await fetchQuota(); } catch {}
+  const sum = usageMeter.summary(quota, {
+    dailyBudget: (config.usage && config.usage.dailyBudget) || 0,
+  });
+  console.log(`\n${t.bold}copilot+ usage${t.reset}\n`);
+  console.log(usageMeter.formatCli(sum));
+  console.log(`\n${t.dim}History: ${history.HISTORY_PATH}${t.reset}\n`);
+  process.exit(0);
+}
+
+function runWorkflowsList() {
+  const config = cfg.load();
+  theme.set(config.theme || 'dark');
+  const t = theme.get(config);
+  const dir = workflows.workflowsDir(config);
+  workflows.ensureDir(dir);
+  const list = workflows.list(config);
+  console.log(`\n${t.bold}Workflows${t.reset} ${t.dim}${dir}${t.reset}\n`);
+  if (!list.length) {
+    console.log('No workflows yet. Create YAML files like:\n');
+    console.log('  name: Fix & Test');
+    console.log('  steps:');
+    console.log('    - prompt: "Run the failing tests and show errors"');
+    console.log('      wait: true');
+    console.log('    - prompt: "Fix the failures"');
+    console.log('      wait: true\n');
+    process.exit(0);
+  }
+  for (const w of list) {
+    const badge = w.invalid ? `${t.error}invalid${t.reset}` : `${w.steps} steps`;
+    console.log(`  ${t.bold}${w.name}${t.reset}  ${t.dim}${badge}${t.reset}`);
+    if (w.description) console.log(`    ${w.description}`);
+  }
+  console.log(`\n${t.dim}Run from palette (Ctrl+K → Workflow: …)${t.reset}\n`);
+  process.exit(0);
+}
+
+function runWorktree() {
+  const idx = ARGV.indexOf('--worktree');
+  const name = ARGV[idx + 1] && !ARGV[idx + 1].startsWith('-')
+    ? ARGV[idx + 1]
+    : `session-${Date.now().toString(36).slice(-6)}`;
+  if (!worktree.isGitRepo()) {
+    console.error('Not inside a git repository.');
+    process.exit(1);
+  }
+  const res = worktree.create({ name });
+  if (!res.ok) {
+    console.error('Worktree failed:', res.error);
+    process.exit(1);
+  }
+  console.log(res.existed ? 'Existing worktree:' : 'Created worktree:');
+  console.log(`  path:   ${res.path}`);
+  console.log(`  branch: ${res.branch}`);
+  console.log(`\nStart a session with:\n  cd ${res.path} && copilot+\n`);
+  process.exit(0);
+}
+
+// ── Doctor: report environment + config status ──────────────────────────────
+async function runDoctor() {
+  const t = theme.get(cfg.load());
+  const config = cfg.load();
+  console.log(`\n${t.bold}copilot+ doctor${t.reset} ${t.dim}v${VERSION}${t.reset}\n`);
+
+  const bins = ['copilot', 'ffmpeg', 'whisper-cli'];
+  for (const b of bins) {
+    const ok = await new Promise(r => execFile(WHICH, [b], err => r(!err)));
+    console.log(`  ${ok ? `${t.success}✓${t.reset}` : `${t.error}✗${t.reset}`}  ${b}`);
+  }
+  const model = cfg.findWhisperModel();
+  console.log(`  ${model ? `${t.success}✓${t.reset}` : `${t.error}✗${t.reset}`}  whisper model${model ? ` — ${model}` : ''}`);
+  console.log(`  ${config.audioDevice ? `${t.success}✓${t.reset}` : `${t.warn}!${t.reset}`}  audio device — ${config.audioDevice || 'not set'}`);
+
+  const warns = cfg.validate(config);
+  if (warns.length) {
+    console.log(`\n${t.warn}Config warnings:${t.reset}`);
+    for (const w of warns) console.log(`  · ${w}`);
+  } else {
+    console.log(`\n${t.success}Config validates clean.${t.reset}`);
+  }
+
+  const stats = history.stats();
+  console.log(`\n${t.dim}History: ${stats.count} entries, ${(stats.bytes / 1024).toFixed(1)} KB${t.reset}`);
+  console.log(`${t.dim}Log: ${logger.LOG_PATH}${t.reset}`);
+  console.log(`${t.dim}Config: ${cfg.CONFIG_PATH}${t.reset}\n`);
+  process.exit(warns.length ? 1 : 0);
+}
+
+// ── History TUI ─────────────────────────────────────────────────────────────
+function runHistory() {
+  const t = theme.get(cfg.load());
+  const idx = ARGV.indexOf('--history');
+  const rest = ARGV.slice(idx + 1).filter(a => !a.startsWith('-'));
+  const clear = ARGV.includes('--clear');
+  if (clear) {
+    history.clear();
+    console.log('history cleared.');
+    process.exit(0);
+  }
+  const query = rest.join(' ').trim();
+  const results = query ? history.search(query, { limit: 50 }) : history.readRecent(50);
+
+  if (!results.length) {
+    console.log(query
+      ? `No matches for "${query}".`
+      : 'No history yet — start a session and submit a prompt to begin logging.');
+    process.exit(0);
+  }
+  console.log(`\n${t.bold}${results.length} entr${results.length === 1 ? 'y' : 'ies'}${query ? ` for "${query}"` : ''}${t.reset}\n`);
+  for (const r of results) {
+    const ts = (r.ts || '').replace('T', ' ').slice(0, 19);
+    const cwd = (r.cwd || '').replace(os.homedir(), '~');
+    console.log(`${t.dim}${ts}${t.reset}  ${t.accent}${r.model || '?'}${t.reset}  ${t.dim}${cwd}${t.reset}`);
+    const lines = String(r.prompt || '').split('\n');
+    for (const line of lines.slice(0, 3)) console.log(`  ${line}`);
+    if (lines.length > 3) console.log(`  ${t.dim}… (${lines.length - 3} more lines)${t.reset}`);
+    console.log('');
+  }
+  console.log(`${t.dim}History: ${history.HISTORY_PATH}${t.reset}`);
+  console.log(`${t.dim}Filter with: copilot+ --history "<query>"  ·  Wipe with: copilot+ --history --clear${t.reset}\n`);
+  process.exit(0);
+}
+
+// ── Snippets / bookmarks browser ───────────────────────────────────────────
+function runSnippets() {
+  const t = theme.get(cfg.load());
+  const idx = ARGV.indexOf('--snippets') !== -1 ? ARGV.indexOf('--snippets') : ARGV.indexOf('--bookmarks');
+  const rest = ARGV.slice(idx + 1).filter(a => !a.startsWith('-'));
+  const query = rest.join(' ').trim();
+
+  const items = bookmarks.list({ query });
+  if (!items.length) {
+    console.log(query
+      ? `No bookmarks match "${query}".`
+      : 'No bookmarks yet — press Ctrl+B inside copilot+ to bookmark the last response.');
+    process.exit(0);
+  }
+  console.log(`\n${t.bold}${items.length} bookmark${items.length === 1 ? '' : 's'}${query ? ` for "${query}"` : ''}${t.reset}\n`);
+  for (const b of items) {
+    const ts = (b.ts || '').replace('T', ' ').slice(0, 19);
+    const tags = (b.tags && b.tags.length) ? `  ${t.accent}#${b.tags.join(' #')}${t.reset}` : '';
+    console.log(`${t.bold}${b.title || '(untitled)'}${t.reset}${tags}`);
+    console.log(`${t.dim}${ts}  ${b.cwd || ''}  id:${b.id}${t.reset}`);
+    const lines = String(b.body || '').split('\n').slice(0, 6);
+    for (const l of lines) console.log(`  ${l}`);
+    if ((b.body || '').split('\n').length > 6) console.log(`  ${t.dim}… (truncated; full body in ${bookmarks.BOOKMARKS_PATH})${t.reset}`);
+    console.log('');
+  }
+  console.log(`${t.dim}Storage: ${bookmarks.BOOKMARKS_PATH}${t.reset}\n`);
+  process.exit(0);
+}
+
+// ── Non-interactive one-shot query (forwards to copilot's own non-TTY mode) ─
+function runAsk() {
+  const idx = ARGV.indexOf('--ask');
+  const rest = ARGV.slice(idx + 1).filter(a => a !== '--ask');
+  if (!rest.length) {
+    console.error('usage: copilot+ --ask "your question"');
+    process.exit(1);
+  }
+  // Best effort — copilot CLI supports `copilot -p "msg"` in non-interactive mode.
+  // We pass everything after --ask straight through.
+  const proc = require('child_process').spawn('copilot', ['-p', rest.join(' ')], { stdio: 'inherit' });
+  proc.on('exit', code => process.exit(code == null ? 0 : code));
+  proc.on('error', err => {
+    console.error('Could not launch copilot:', err.message);
+    process.exit(1);
+  });
+}
+
+// ── Setup wizard ────────────────────────────────────────────────────────────
 async function runSetup() {
   const config = cfg.load();
+  const t = theme.get(config);
 
-  console.log('\n🛠  copilot-plus setup\n');
+  console.log(`\n${t.bold}🛠  copilot-plus setup${t.reset}\n`);
   console.log('Checking dependencies…\n');
 
   const [hasCopilot, hasFfmpeg, hasWhisper] = await Promise.all([
     checkBinary('copilot', {
-      found: '✅  copilot   — found',
+      found: `${t.success}✅${t.reset}  copilot   — found`,
       missing: [
-        '❌  copilot   — not found in PATH',
+        `${t.error}❌${t.reset}  copilot   — not found in PATH`,
         '     Install: https://github.com/github/copilot-cli',
       ],
     }),
     checkBinary('ffmpeg', {
-      found: '✅  ffmpeg    — found',
+      found: `${t.success}✅${t.reset}  ffmpeg    — found`,
       missing: IS_WIN
-        ? ['❌  ffmpeg    — not found', '     Install: winget install Gyan.FFmpeg']
-        : ['❌  ffmpeg    — not found', '     Install: brew install ffmpeg'],
+        ? [`${t.error}❌${t.reset}  ffmpeg    — not found`, '     Install: winget install Gyan.FFmpeg']
+        : os.platform() === 'linux'
+          ? [`${t.error}❌${t.reset}  ffmpeg    — not found`, '     Install: apt install ffmpeg / dnf install ffmpeg']
+          : [`${t.error}❌${t.reset}  ffmpeg    — not found`, '     Install: brew install ffmpeg'],
     }),
     checkBinary('whisper-cli', {
-      found: '✅  whisper-cli — found',
+      found: `${t.success}✅${t.reset}  whisper-cli — found`,
       missing: IS_WIN
         ? [
-            '❌  whisper-cli — not found',
+            `${t.error}❌${t.reset}  whisper-cli — not found`,
             '     Install: https://github.com/ggerganov/whisper.cpp/releases',
             '     Place whisper-cli.exe somewhere on your PATH',
           ]
-        : [
-            '❌  whisper-cli — not found',
-            '     Install: brew install whisper-cpp',
-            '     Model:   whisper-cpp-download-ggml-model base.en',
-          ],
+        : os.platform() === 'linux'
+          ? [
+              `${t.error}❌${t.reset}  whisper-cli — not found`,
+              '     Install: build from https://github.com/ggerganov/whisper.cpp',
+              '     Model:   curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin -o ~/.copilot/models/ggml-base.en.bin',
+            ]
+          : [
+              `${t.error}❌${t.reset}  whisper-cli — not found`,
+              '     Install: brew install whisper-cpp',
+              '     Model:   whisper-cpp-download-ggml-model base.en',
+            ],
     }),
   ]);
 
@@ -105,9 +430,9 @@ async function runSetup() {
   if (hasWhisper) {
     const model = cfg.findWhisperModel();
     if (model) {
-      console.log(`✅  model        — ${model}`);
+      console.log(`${t.success}✅${t.reset}  model        — ${model}`);
     } else {
-      console.log('❌  model        — no model file found');
+      console.log(`${t.error}❌${t.reset}  model        — no model file found`);
       console.log('     Option A: whisper-cpp-download-ggml-model base.en');
       console.log('     Option B: mkdir -p ~/.copilot/models && curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin -o ~/.copilot/models/ggml-base.en.bin\n');
       allGood = false;
@@ -117,30 +442,32 @@ async function runSetup() {
   console.log('\n─────────────────────────────────────');
   console.log('Config:', cfg.CONFIG_PATH);
   console.log(`  modelPath:      ${config.modelPath || '(not set)'}`);
-  console.log(`  autoSubmit:     ${config.autoSubmit}   (auto-press Enter after transcription)`);
+  console.log(`  autoSubmit:     ${config.autoSubmit}   ${t.dim}(auto-press Enter after transcription)${t.reset}`);
+  console.log(`  voicePreview:   ${config.voicePreview}   ${t.dim}(review/edit before sending)${t.reset}`);
+  console.log(`  voiceLanguage:  ${config.voiceLanguage}`);
+  console.log(`  theme:          ${config.theme}`);
   console.log(`  voice activation: ${config.wakeWord && config.wakeWord.enabled ? `enabled (phrase: "${config.wakeWord.phrase || 'hey copilot'}")` : 'disabled'}`);
   const macroCount = Object.values(config.macros).filter(Boolean).length;
   console.log(`  macros:         ${macroCount}/9 configured`);
+  console.log(`  history:        ${config.historyEnabled === false ? 'off' : 'on'}`);
+  console.log(`  safety:         ${(config.safety && config.safety.enabled === false) ? 'off' : 'on'}`);
+  console.log(`  tts:            ${(config.tts && config.tts.enabled) ? 'on' : 'off'}`);
 
   const devices = cfg.listMicDevices();
   if (devices.length === 0) {
-    console.log(`  audioDevice: ${config.audioDevice}   (could not list devices — is ffmpeg installed?)`);
-    console.log('\nHotkeys (inside copilot+):');
+    console.log(`  audioDevice: ${config.audioDevice}   (could not list devices)`);
     printHotkeysAndExit(allGood);
     return;
   }
-
   console.log('\nAvailable audio input devices:');
   devices.forEach(({ id, name }, i) => {
-    const marker = id === config.audioDevice ? ' ◀ current' : '';
-    console.log(`  [${i + 1}] ${name}  (${id})${marker}`);
+    const marker = id === config.audioDevice ? ` ${t.accent}◀ current${t.reset}` : '';
+    console.log(`  [${i + 1}] ${name}  ${t.dim}(${id})${t.reset}${marker}`);
   });
 
   const autoIdx = devices.findIndex(d => d.id === config.audioDevice);
-
   if (!process.stdin.isTTY) {
     console.log(`  audioDevice: ${config.audioDevice || '(not set)'}   (non-interactive — run copilot+ --setup in a terminal to pick)`);
-    console.log('\nHotkeys (inside copilot+):');
     printHotkeysAndExit(allGood);
     return;
   }
@@ -153,31 +480,28 @@ async function runSetup() {
     const choice = parseInt(trimmed, 10);
     if (!isNaN(choice) && choice >= 1 && choice <= devices.length) {
       const chosen = devices[choice - 1];
-      // Read raw file config so we don't persist auto-detected values
       let rawConfig = {};
       try { rawConfig = JSON.parse(fs.readFileSync(cfg.CONFIG_PATH, 'utf8')); } catch {}
       rawConfig.audioDevice = chosen.id;
-      // Fix stale model path if the saved one no longer exists
       if (!rawConfig.modelPath || !fs.existsSync(rawConfig.modelPath)) {
         const found = cfg.findWhisperModel();
         if (found) rawConfig.modelPath = found;
       }
       cfg.save(rawConfig);
-      console.log(`✅  Audio device set to: ${chosen.name}  (${chosen.id})\n`);
+      console.log(`${t.success}✅${t.reset}  Audio device set to: ${chosen.name}  (${chosen.id})\n`);
     } else {
-      console.log('⚠️   Invalid choice — audio device unchanged.\n');
+      console.log(`${t.warn}⚠️${t.reset}   Invalid choice — audio device unchanged.\n`);
     }
   } else {
     console.log(`  Audio device unchanged: ${config.audioDevice}\n`);
   }
 
-  console.log('Hotkeys (inside copilot+):');
   printHotkeysAndExit(allGood);
 }
 
 function checkBinary(name, messages) {
   return new Promise(resolve => {
-    execFile(WHICH, [name], (err) => {
+    execFile(WHICH, [name], err => {
       if (err) {
         for (const line of messages.missing) console.log(line);
         console.log('');
@@ -192,33 +516,37 @@ function checkBinary(name, messages) {
 
 function promptQuestion(prompt) {
   const rl = require('readline').createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise(resolve => {
-    rl.question(prompt, (answer) => {
-      rl.close();
-      resolve(answer);
-    });
-  });
+  return new Promise(resolve => rl.question(prompt, ans => { rl.close(); resolve(ans); }));
 }
 
 function printHotkeysAndExit(allGood) {
-  console.log('  Ctrl+R  →  Start / stop voice recording');
-  console.log('  Ctrl+P  →  Take a screenshot (injected as @path)');
-  console.log('  Ctrl+K  →  Open command palette');
-  console.log('  Option+Shift+1–4 / Ctrl+Shift+1–4  →  Switch workhorse models');
-  console.log('  Option+Shift+5 / Ctrl+Shift+5      →  Toggle Auto Mode');
-  console.log('  Option+1–9 →  Execute prompt macro (enable "Use Option as Meta Key" in Terminal settings)');
-  console.log('  Ctrl+1–9   →  Execute prompt macro (CSI u terminals: kitty, WezTerm)');
-  console.log('\nUsage:');
-  console.log('  copilot+                →  launch copilot with all enhancements');
-  console.log('  copilot+ --monitor      →  live dashboard of all running agents');
-  console.log('  copilot+ --setup        →  show this screen');
-  console.log('  copilot+ --preferences  →  configure voice activation, macros');
-  console.log('  copilot+ --help         →  pass --help through to copilot\n');
+  const t = theme.get(cfg.load());
+  console.log(`${t.bold}Hotkeys (inside copilot+):${t.reset}`);
+  const lines = [
+    ['?',                  'in-app cheatsheet'],
+    ['Ctrl+R',             'voice recording'],
+    ['Ctrl+P',             'screenshot'],
+    ['Ctrl+Y',             'paste clipboard'],
+    ['Ctrl+G',             'inject smart context (git diff)'],
+    ['Ctrl+T',             'toggle text-to-speech'],
+    ['Ctrl+B',             'bookmark last response'],
+    ['Ctrl+K',             'command palette'],
+    [`${IS_WIN ? 'Ctrl+Shift' : 'Opt+⇧'}+1–5`, 'switch model / toggle auto'],
+    [`${IS_WIN ? 'Ctrl' : 'Opt'}+1–9`,         'macros'],
+    ['!cmd <Enter>',       'inject shell output'],
+  ];
+  for (const [k, d] of lines) console.log(`  ${k.padEnd(18)}${t.dim}${d}${t.reset}`);
 
-  if (allGood) {
-    console.log('✅  All dependencies found. Run `copilot+` to start!\n');
-  } else {
-    console.log('⚠️   Fix the issues above, then re-run `copilot+ --setup`.\n');
-  }
+  console.log(`\n${t.bold}Usage:${t.reset}`);
+  console.log(`  copilot+                ${t.dim}launch with all enhancements${t.reset}`);
+  console.log(`  copilot+ --monitor      ${t.dim}live dashboard of running agents${t.reset}`);
+  console.log(`  copilot+ --history      ${t.dim}search past prompts${t.reset}`);
+  console.log(`  copilot+ --snippets     ${t.dim}browse bookmarked responses${t.reset}`);
+  console.log(`  copilot+ --doctor       ${t.dim}validate config + environment${t.reset}`);
+  console.log(`  copilot+ --preferences  ${t.dim}re-run onboarding${t.reset}`);
+  console.log(`  copilot+ --help-plus    ${t.dim}full help${t.reset}\n`);
+
+  if (allGood) console.log(`${t.success}✅  All dependencies found. Run \`copilot+\` to start!${t.reset}\n`);
+  else         console.log(`${t.warn}⚠️   Fix the issues above, then re-run \`copilot+ --setup\`.${t.reset}\n`);
   process.exit(0);
 }

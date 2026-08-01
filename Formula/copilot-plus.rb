@@ -2,9 +2,9 @@
 # brew install copilot-plus
 
 class CopilotPlus < Formula
-  desc "Voice + screenshots + model hotkeys + live agent monitor for GitHub Copilot CLI"
+  desc "Voice + screenshots + workflows + queue + TTS + history for GitHub Copilot CLI"
   homepage "https://github.com/Errr0rr404/copilot-plus"
-  url "https://github.com/Errr0rr404/copilot-plus/archive/refs/tags/v1.0.29.tar.gz"
+  url "https://github.com/Errr0rr404/copilot-plus/archive/refs/tags/v1.2.0.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
   license "MIT"
 
@@ -23,7 +23,7 @@ class CopilotPlus < Formula
 
     libexec.install Dir["*"]
 
-    # Write a launcher that ensures the Homebrew node is on PATH
+    # Launcher that ensures the Homebrew node is on PATH
     (bin/"copilot+").write_env_script libexec/"bin/copilot+",
       PATH: "#{Formula["node"].opt_bin}:$PATH"
   end
@@ -38,25 +38,33 @@ class CopilotPlus < Formula
         curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin \\
           -o ~/.copilot/models/ggml-base.en.bin
 
-      Then verify your setup:
-        copilot+ --setup
+      Verify everything:
+        copilot+ --doctor
 
       Hotkeys inside copilot+:
-        Ctrl+R              →  Start / stop voice recording
-        Ctrl+P              →  Take a screenshot (attached as @path)
-        Ctrl+K              →  Open command palette
-        Option+Shift+1–4    →  Switch workhorse model slot (macOS Terminal.app)
-        Ctrl+Shift+1–4      →  Switch workhorse model slot (kitty/WezTerm)
-        Option+1–9          →  Execute a prompt macro (macOS Apple Terminal)
-        Ctrl+1–9            →  Execute a prompt macro (kitty/WezTerm/Windows Terminal)
+        ?  / Ctrl+/         →  in-app cheatsheet
+        Ctrl+K              →  command palette (fuzzy search every feature)
+        Ctrl+R              →  voice recording
+        Ctrl+P              →  screenshot
+        Ctrl+Y              →  paste clipboard (text or image)
+        Ctrl+G              →  inject smart context (git diff, recent files)
+        Ctrl+T              →  toggle text-to-speech
+        Ctrl+B              →  bookmark last response
+        Option+Shift+1–4    →  switch workhorse model (macOS Terminal.app)
+        Ctrl+Shift+1–4      →  switch workhorse model (kitty/WezTerm/Windows Terminal)
+        Option+1–9          →  execute prompt macro (macOS Apple Terminal)
+        Ctrl+1–9            →  execute prompt macro (CSI u terminals)
+        !cmd                →  run shell command, inject output as context
 
-      Monitor all running copilot sessions:
-        copilot+ --monitor
+      Tools:
+        copilot+ --monitor   →  live multi-session dashboard
+        copilot+ --history   →  search past prompts
+        copilot+ --snippets  →  browse bookmarked responses
     EOS
   end
 
   test do
-    output = shell_output("#{bin}/copilot+ --setup 2>&1")
-    assert_match "copilot-plus setup", output
+    output = shell_output("#{bin}/copilot+ --version")
+    assert_match "copilot-plus", output
   end
 end

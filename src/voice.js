@@ -5,7 +5,27 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const IS_WIN = os.platform() === 'win32';
+const PLATFORM = os.platform();
+const IS_WIN   = PLATFORM === 'win32';
+const IS_MAC   = PLATFORM === 'darwin';
+const IS_LINUX = PLATFORM === 'linux';
+
+/**
+ * Pick the ffmpeg input args for the current platform's recording back-end.
+ * macOS → avfoundation, Windows → dshow, Linux → pulse (preferred) or alsa.
+ */
+function _inputArgs(device) {
+  if (IS_WIN)   return ['-f', 'dshow', '-i', `audio=${device}`];
+  if (IS_MAC)   return ['-f', 'avfoundation', '-i', device];
+  // Linux: device is either "pulse:<src>" or "alsa:<hw>". Default to pulse default sink.
+  if (typeof device === 'string' && device.startsWith('alsa:')) {
+    return ['-f', 'alsa', '-i', device.slice('alsa:'.length)];
+  }
+  const src = (typeof device === 'string' && device.startsWith('pulse:'))
+    ? device.slice('pulse:'.length)
+    : (device || 'default');
+  return ['-f', 'pulse', '-i', src];
+}
 
 class VoiceRecorder {
   constructor(config) {
@@ -28,9 +48,10 @@ class VoiceRecorder {
 
     this._audioFile = path.join(os.tmpdir(), `copilot-voice-${Date.now()}.wav`);
 
-    const ffmpegArgs = IS_WIN
-      ? ['-f', 'dshow', '-i', `audio=${this.config.audioDevice}`, '-ar', '16000', '-ac', '1', '-y', this._audioFile]
-      : ['-f', 'avfoundation', '-i', this.config.audioDevice, '-ar', '16000', '-ac', '1', '-y', this._audioFile];
+    const ffmpegArgs = [
+      ..._inputArgs(this.config.audioDevice),
+      '-ar', '16000', '-ac', '1', '-y', this._audioFile,
+    ];
 
     this._proc = spawn('ffmpeg', ffmpegArgs, {
       stdio: ['pipe', 'ignore', 'ignore'],
@@ -70,13 +91,11 @@ class VoiceRecorder {
     // ffmpeg silencedetect filter — stops recording when silence is detected
     const silenceFilter = `silencedetect=noise=${silenceThreshold}dB:duration=${silenceDuration}`;
 
-    const ffmpegArgs = IS_WIN
-      ? ['-f', 'dshow', '-i', `audio=${this.config.audioDevice}`,
-         '-af', silenceFilter, '-t', String(maxSeconds),
-         '-ar', '16000', '-ac', '1', '-y', audioFile]
-      : ['-f', 'avfoundation', '-i', this.config.audioDevice,
-         '-af', silenceFilter, '-t', String(maxSeconds),
-         '-ar', '16000', '-ac', '1', '-y', audioFile];
+    const ffmpegArgs = [
+      ..._inputArgs(this.config.audioDevice),
+      '-af', silenceFilter, '-t', String(maxSeconds),
+      '-ar', '16000', '-ac', '1', '-y', audioFile,
+    ];
 
     return new Promise((resolve, reject) => {
       let stderrBuf = '';
@@ -191,13 +210,15 @@ class VoiceRecorder {
       ));
     }
 
+    // Language override: 'auto' or ISO 639-1 (e.g. 'es', 'ja'). Defaults to 'en'
+    // since the bundled models are *.en (English-only). Non-English speakers
+    // should drop a non-.en model (e.g. ggml-base.bin) at the same path.
+    const lang = (this.config.voiceLanguage || 'en').trim();
+    const args = ['-m', modelPath, '-f', audioFile, '-np', '-nt'];
+    if (lang && lang !== 'en') args.push('-l', lang === 'auto' ? 'auto' : lang);
+
     return new Promise((resolve, reject) => {
-      execFile('whisper-cli', [
-        '-m', modelPath,
-        '-f', audioFile,
-        '-np',   // no extra prints
-        '-nt',   // no timestamps
-      ], (err, stdout) => {
+      execFile('whisper-cli', args, (err, stdout) => {
         if (err) return reject(err);
 
         const text = stdout

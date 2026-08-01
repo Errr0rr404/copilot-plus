@@ -1,12 +1,13 @@
 {
   "name": "copilot-plus",
-  "version": "1.0.29",
-  "description": "Voice + screenshots + model hotkeys + live agent monitor — drop-in wrapper for GitHub Copilot CLI",
+  "version": "1.2.0",
+  "description": "Voice + screenshots + smart context + clipboard + shell + TTS + history + bookmarks + workflows + queue + plugins — drop-in wrapper for GitHub Copilot CLI",
   "bin": {
     "copilot+": "bin/copilot+"
   },
   "scripts": {
     "setup": "node \"bin/copilot+\" --setup",
+    "test": "node tests/run.js",
     "postinstall": "node scripts/postinstall.js"
   },
   "files": [
@@ -27,7 +28,21 @@
     "wake-word",
     "model-switching",
     "macros",
-    "command-palette"
+    "command-palette",
+    "text-to-speech",
+    "tts",
+    "clipboard",
+    "context",
+    "history",
+    "bookmarks",
+    "secrets-scanner",
+    "plugins",
+    "themes",
+    "workflows",
+    "prompt-queue",
+    "usage",
+    "worktree",
+    "linux"
   ],
   "author": "Errr0rr404",
   "license": "MIT",

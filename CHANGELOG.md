@@ -4,6 +4,129 @@ All notable changes to **copilot-plus** are documented here.
 
 ---
 
+## [1.2.0] — 2026-08-01
+
+Community-driven release: features people most often wish GitHub Copilot CLI
+had — researched from X, Reddit, and github/copilot-cli issues — implemented
+as a cohesive wrapper pack.
+
+### Added
+
+- **Prompt workflows / chains** — YAML or JSON multi-step sequences in
+  `~/.copilot/workflows/`. Variables: `{{cwd}}`, `{{git_branch}}`,
+  `{{clipboard}}`, `{{date}}`. Run from palette or list with
+  `copilot+ --workflows`.
+- **Smart notification rules** — `session_idle`, `waiting_input` (silence
+  threshold), `quota_above` with channels `os` / `bell` / `webhook`.
+  Configure under `notifications.rules` + optional `webhookUrl`.
+- **Config export / import** — `copilot+ --export-config [file]` and
+  `--import-config <file> [--overwrite]` for team macros, models, theme,
+  safety, notifications, and workflows.
+- **Ctrl+E** — open the last settled response in `$VISUAL` / `$EDITOR`.
+- **Ctrl+S prompt stash** — park a draft prompt, do `/model` or shell work,
+  restore from the palette (stack persisted in `~/.copilot/prompt-stash.json`).
+- **Pending prompt queue** — while the agent is responding, Enter enqueues
+  the line (`queue.whenBusy`, default on). Auto-flushes when idle; palette
+  flush/clear.
+- **Usage meter** — `copilot+ --usage` shows local history stats, optional
+  daily budget, and premium quota when a GitHub token is available.
+- **Ctrl+O file picker** — fuzzy project files → inject `@/abs/path`.
+- **Worktree launcher** — `copilot+ --worktree [name]` (and palette) creates
+  an isolated git worktree under `.copilot-worktrees/`.
+- **Limit handoff** — auto-writes `~/.copilot/handoffs/*.md` when premium
+  usage crosses `usage.handoffAtPct` (default 90%); manual handoff from palette.
+
+### Improved
+
+- Cheatsheet, help, and palette cover every new hotkey and CLI flag.
+- Config defaults deep-merge `queue`, `usage`, and richer `notifications`.
+
+---
+
+## [1.1.0] — 2026-05-16
+
+A flagship release: nine roadmap features shipped at once, a full Linux
+port, an interactive monitor, fuzzy palette ranking, a plugin/hook system,
+an in-app cheatsheet, voice-preview mode, and a 62-test in-repo suite.
+
+### Added
+
+- **`?` / Ctrl+/ in-app cheatsheet** — lists every hotkey copilot+ provides,
+  generated from the active config so it always reflects current state.
+  Discoverability has been the #1 friction point; this fixes it.
+- **Ctrl+Y — clipboard paste** — pulls text or image from the OS clipboard
+  and injects it. Cross-platform (`pbpaste` / PowerShell / `wl-paste` /
+  `xclip`).
+- **Ctrl+G — smart context injection** — gathers git status, diff, and
+  recently-modified files, and pastes them as a `[context]…[/context]`
+  block. Configurable via `contextHotkey.kinds`.
+- **Ctrl+T — text-to-speech** — reads each settled response aloud using
+  the OS-native voice (`say` / `System.Speech` / `spd-say` / `espeak`).
+  Strips code blocks and markdown noise before speaking.
+- **Ctrl+B — bookmark last response** — saves to
+  `~/.copilot/bookmarks.json`; browse with `copilot+ --snippets`.
+- **`!cmd` shell prefix** — typing `!ls -la` then Enter runs the shell
+  command and injects its output as a fenced block. 15s timeout, 16 KiB
+  output cap.
+- **Pre-send safety scanner** — 12 regex rules for AWS / GitHub / OpenAI /
+  Anthropic / Google / Slack / Stripe / private keys / JWTs / generic
+  passwords. Prompts to send / redact / cancel; can be set to auto-redact
+  silently. Toggle with `safety.enabled`.
+- **Session history** — every prompt is logged to
+  `~/.copilot/history.jsonl` and is searchable via
+  `copilot+ --history [query]`. Token-AND substring search.
+- **Theme engine** — `dark`, `light`, `solarized`, `monokai`, `auto`.
+  Applied across palette, cheatsheet, monitor, doctor, and onboarding.
+  Switch via the palette.
+- **Plugin / hook system** — drop `*.js` files in `~/.copilot/plugins/`
+  to subscribe to `beforeSend`, `afterReceive`, `afterPrompt`,
+  `onModelSwitch`, `onBookmark`. Reload via the palette.
+- **Voice-preview mode** (`voicePreview: true`) — transcribed text drops
+  into the prompt instead of auto-sending, so you can review/edit before
+  Enter.
+- **Multi-language voice** — `voiceLanguage: 'auto' | 'en' | 'es' | …`
+  passes through to whisper.cpp. English (default) keeps the bundled
+  `*.en` model; other languages need a non-`.en` model file.
+- **Interactive monitor** — `j`/`k` navigate, `/` filter, `s` cycle sort,
+  `K` SIGTERM the selected agent, `o` open its cwd in a new terminal tab,
+  `r` force-refresh quota, `?` toggle inline help. Selected card is
+  highlighted; sort/filter badges sit in the header row.
+- **`copilot+ --doctor`** — validates config and probes every required
+  binary, mic, whisper model. Returns non-zero on issues.
+- **`copilot+ --history` / `--snippets` / `--ask` / `--version` /
+  `--help-plus`** CLI flags.
+- **Linux support** — mic detection (`pulse` / `alsa`), screenshot
+  (`grim`+`slurp`, gnome-screenshot, spectacle, scrot, maim), clipboard
+  (`wl-paste`/`xclip`/`xsel`), and `notify-send` for notifications.
+- **In-repo zero-dep test suite** — 62 tests across safety, palette
+  ranking, classifier, macros, context, TTS summariser, history,
+  bookmarks, shell-exec, theme, wake-word matcher, config validator.
+  Run with `npm test`.
+- **Logger** — `~/.copilot/copilot-plus.log` with `info / warn / error /
+  debug` levels; raise verbosity with `COPILOT_PLUS_LOG=debug`.
+
+### Improved
+
+- **Palette** — fzf-style fuzzy ranking with consecutive/word-start
+  bonuses and recents boost; ranking matches what fzf/Cmd+P users expect.
+- **Palette close** — now erases exactly the rows it drew; the previous
+  formula (`MAX_VISIBLE + 6`) left ghost lines on tall renders.
+- **Onboarding** — comprehensive multi-step wizard demonstrates every
+  hotkey, asks about language / theme / preview / TTS / safety / history,
+  prints a single at-a-glance cheatsheet at the top.
+- **Setup / help / doctor** — themed, sectioned, and consistent with the
+  rest of the UI.
+- **Notifications** — Linux uses `notify-send`; can be silenced with
+  `notifications.quiet`.
+
+### Changed
+
+- **Default version bumped to 1.1.0** to reflect the surface-area jump.
+- `--help` is reserved for forwarding to `copilot` (legacy behaviour);
+  use `--help-plus` / `-h` for the wrapper-specific help.
+
+---
+
 ## [1.0.29] — 2026-05-15
 
 ### Fixed
