@@ -21,6 +21,8 @@
   <strong>Talk to <a href="https://docs.github.com/copilot/concepts/agents/about-copilot-cli">GitHub Copilot CLI</a> with your voice — share screenshots & clipboard — queue prompts while it works — run multi-step workflows — switch AI models instantly — search every prompt you've ever sent — and monitor every running session from one live dashboard.</strong>
 </p>
 
+**Who it’s for.** Developers who already run GitHub Copilot CLI in a terminal and want local voice, screenshots, a prompt queue, workflows, safety scanning, and a multi-session monitor — without leaving the CLI. `copilot+` does **not** replace Copilot CLI: you still need a Copilot subscription and the official `copilot` binary on your `PATH`.
+
 <p align="center">
   <a href="https://www.npmjs.com/package/copilot-plus">📦 View on npm</a> ·
   <a href="https://github.com/Errr0rr404/copilot-plus">⭐ Star on GitHub</a> ·
@@ -56,7 +58,7 @@
 | `copilot+`                  | Launch with every enhancement |
 | `copilot+ --monitor`        | Live, interactive multi-session dashboard |
 | `copilot+ --history [q]`    | Search every prompt you've sent |
-| `copilot+ --snippets`       | Browse bookmarked responses |
+| `copilot+ --snippets`       | Browse bookmarked responses (`--bookmarks` is an alias) |
 | `copilot+ --usage`          | Local history + premium quota summary |
 | `copilot+ --workflows`      | List multi-step prompt workflows |
 | `copilot+ --worktree [name]`| Create an isolated git worktree for parallel work |
@@ -73,11 +75,11 @@ Everything else — all Copilot CLI features, slash commands, modes — works ex
 
 > **🔒 Pre-send safety scanner.** Every prompt is scanned for common API keys, tokens, and private-key headers before it leaves your terminal. Send / redact / cancel — your call. Disable with `safety.enabled: false`.
 
-> **🌍 Multi-language voice.** Set `voiceLanguage: "es"` (or any ISO 639-1 code, or `"auto"`) in `~/.copilot/copilot-plus.json` to transcribe in 99+ languages. Bundled `*.en` model is English-only — drop a non-`.en` whisper model in `~/.copilot/models/` for other languages.
+> **🌍 Multi-language voice.** Set `voiceLanguage: "es"` (or any ISO 639-1 code, or `"auto"`) in `~/.copilot/copilot-plus.json` to transcribe in 99+ languages. The usual `*.en` whisper model is English-only — drop a non-`.en` model in `~/.copilot/models/` (or set `modelPath`) for other languages. Whisper models are **not** shipped in the npm tarball.
 
 > **🎨 Themed UI.** `dark`, `light`, `solarized`, `monokai`, or `auto` — applied across palette, monitor, cheatsheet, doctor, and onboarding. Switch via Ctrl+K.
 
-> **🧩 Plugin system.** Drop any `*.js` file in `~/.copilot/plugins/` to subscribe to `beforeSend`, `afterReceive`, `afterPrompt`, `onModelSwitch`, `onBookmark`. Reload from the palette without restarting.
+> **🧩 Plugin system.** Drop any `*.js` or `*.cjs` file in `~/.copilot/plugins/` to subscribe to `beforeSend`, `afterReceive`, `afterPrompt`, `onModelSwitch`, `onBookmark`. Reload from the palette without restarting.
 
 > **⛓ Prompt workflows.** Drop YAML/JSON chains in `~/.copilot/workflows/` and run them from the palette. Example:
 > ```yaml
@@ -92,9 +94,24 @@ Everything else — all Copilot CLI features, slash commands, modes — works ex
 
 > **📥 Prompt queue & stash.** Type the next prompt while Copilot is still working — it queues and auto-sends when idle. Mid-prompt interruption? **Ctrl+S** stashes the draft.
 
-> **🔔 Smart notifications.** Rules for “response ready”, “waiting too long”, and “quota high” via OS notifications, terminal bell, or a webhook URL.
+> **🔔 Smart notifications.** Config rules `session_idle`, `waiting_input` (silence threshold), and `quota_above` via channels `os` / `bell` / `webhook`.
 
 ---
+
+## Stack
+
+| | From the repo today |
+|---|---|
+| **Package** | `copilot-plus` **v1.2.0** (`package.json`) |
+| **CLI** | `copilot+` → `bin/copilot+` |
+| **Language** | Node.js CommonJS (no TypeScript compile step) |
+| **Runtime** | Node.js **≥ 18** (`engines.node`) |
+| **Library** | `node-pty` `^1.0.0` (lockfile **1.1.0**) |
+| **License** | MIT |
+| **Platforms** | macOS, Windows, Linux |
+| **Wraps** | GitHub Copilot CLI (`copilot` on `PATH`) |
+| **Voice (optional)** | `ffmpeg` + whisper.cpp (`whisper-cli`) + a local `.bin` model |
+| **CI publish** | GitHub Actions on `v*` tags, Node **20** (see [Release / deploy](#release--deploy)) |
 
 ## Requirements
 
@@ -116,18 +133,22 @@ Everything else — all Copilot CLI features, slash commands, modes — works ex
 
 ## Installation
 
-### Option A — npm (macOS + Windows)
+### Option A — npm (macOS, Windows, Linux)
 
 ```bash
 npm install -g copilot-plus
 ```
 
-### Option B — Homebrew (macOS only)
+The package’s `postinstall` script chmods `node-pty` spawn helpers on macOS and Linux so the PTY wrapper can start.
+
+### Option B — Homebrew (macOS)
 
 ```bash
 brew tap Errr0rr404/copilot-plus
 brew install copilot-plus
 ```
+
+The tap repo is [Errr0rr404/homebrew-copilot-plus](https://github.com/Errr0rr404/homebrew-copilot-plus). The formula in this repo under `Formula/` is a snapshot used by that tap.
 
 ---
 
@@ -163,6 +184,23 @@ curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.
   -o "$env:USERPROFILE\.copilot\models\ggml-base.en.bin"
 ```
 
+### Linux — install speech dependencies
+
+```bash
+# Debian/Ubuntu
+sudo apt install ffmpeg
+# Fedora
+# sudo dnf install ffmpeg
+
+# whisper-cli — build from https://github.com/ggerganov/whisper.cpp and put it on PATH
+
+mkdir -p ~/.copilot/models
+curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin" \
+  -o ~/.copilot/models/ggml-base.en.bin
+```
+
+Clipboard / screenshot / TTS helpers are listed in [Requirements](#requirements). Install those only if you use the matching hotkeys.
+
 ### Verify setup
 
 ```bash
@@ -181,7 +219,25 @@ The setup wizard also lists all detected audio input devices and lets you pick t
 copilot+
 ```
 
-That's it. You're now inside Copilot CLI with voice and screenshot support active.
+That's it. You're now inside Copilot CLI with the wrapper enhancements active. Voice and screenshots need the optional speech / capture tools above; everything else works without them.
+
+### Develop from this repo
+
+```bash
+git clone https://github.com/Errr0rr404/copilot-plus.git
+cd copilot-plus
+npm install
+node bin/copilot+ --help-plus
+npm test
+```
+
+| npm script | What it runs |
+|---|---|
+| `npm test` | `node tests/run.js` — zero-dep in-repo suite |
+| `npm run setup` | `node bin/copilot+ --setup` |
+| `npm run postinstall` | `node scripts/postinstall.js` (chmod `node-pty` helpers on darwin/linux) |
+
+There is no build step. After `npm install`, run `node bin/copilot+` (or link the bin) with GitHub Copilot CLI on your `PATH`.
 
 ---
 
@@ -318,7 +374,7 @@ JSON workflows (`.json`) are also supported.
 
 ## Config Sharing & Worktrees
 
-Share macros, models, theme, safety, notifications, and workflows with your team:
+Share macros, models, theme, safety, notifications, and workflows with your team. Export copies config keys only — it does not include GitHub tokens or other credentials.
 
 ```bash
 copilot+ --export-config ./team-copilot-plus.json
@@ -352,7 +408,7 @@ Tune via `tts: { enabled, rate, voice }` in config.
 
 ## Plugins / Hooks
 
-Drop any `.js` file in `~/.copilot/plugins/`. Export an object with any of these hooks:
+Drop any `.js` or `.cjs` file in `~/.copilot/plugins/`. Export an object (or a function that returns one) with any of these hooks:
 
 ```js
 // ~/.copilot/plugins/log-prompts.js
@@ -702,10 +758,22 @@ Settings are stored at `~/.copilot/copilot-plus.json` (created automatically on 
 
 ### Environment variables
 
-| Var | What |
+Names only — do not put tokens or other secrets in the repo, issues, or docs. Quota features also work via `gh auth token` or Copilot’s local apps file if no token env is set.
+
+| Name | Used for |
 |---|---|
-| `COPILOT_PLUS_LOG`   | `debug`/`info`/`warn`/`error` — raise log verbosity in `~/.copilot/copilot-plus.log` |
-| `COPILOT_PLUS_THEME` | One-shot theme override (`dark`/`light`/`solarized`/`monokai`/`auto`) |
+| `COPILOT_PLUS_LOG` | Log level for `~/.copilot/copilot-plus.log` (`debug` / `info` / `warn` / `error`; default `warn`) |
+| `COPILOT_PLUS_THEME` | One-shot theme override (`dark` / `light` / `solarized` / `monokai` / `auto`) |
+| `COPILOT_GITHUB_TOKEN` | GitHub token for `--monitor` / `--usage` quota (checked first) |
+| `GH_TOKEN` | Same quota lookup (fallback) |
+| `GITHUB_TOKEN` | Same quota lookup (fallback) |
+| `VISUAL` | Editor for Ctrl+E / palette “open last response” (preferred) |
+| `EDITOR` | Editor fallback if `VISUAL` is unset |
+| `SHELL` | Shell for `!cmd` on macOS/Linux |
+| `ComSpec` | Shell for `!cmd` on Windows |
+| `TERM` | PTY terminal type (default `xterm-256color`) |
+| `APPDATA` | Windows: Copilot apps-file token discovery |
+| `LOCALAPPDATA` | Windows: Copilot apps-file token discovery |
 
 ### Available whisper models
 
@@ -768,7 +836,7 @@ Transcription is 100% local — whisper.cpp runs on your machine, nothing is sen
 
 ## Plugins
 
-Place a `*.js` file in `~/.copilot/plugins/` exporting any of these hooks. Hooks fire in load order; errors are isolated.
+Place a `*.js` or `*.cjs` file in `~/.copilot/plugins/` exporting any of these hooks. Hooks fire in load order; errors are isolated.
 
 ```js
 // ~/.copilot/plugins/auto-prefix.js
@@ -790,10 +858,62 @@ Supported hooks: `beforeSend`, `afterReceive`, `afterPrompt`, `onModelSwitch`, `
 ## Tests
 
 ```bash
-npm test     # 62 zero-dep tests, < 1s
+npm test     # node tests/run.js — 87 tests, no extra test runner
 ```
 
-Coverage spans the safety scanner, palette fuzzy ranking, prompt classifier, macro parser, smart-context kind detector, TTS summariser, history search, bookmarks CRUD, shell-exec formatter, theme integrity, wake-phrase matcher, and config validator. The harness uses no third-party dependencies and lives in `tests/`.
+The harness (`tests/run.js`) discovers `tests/*.test.js` and uses `tests/_assert.js`. There is no CI job that runs tests on pull requests; `npm test` is local. Coverage today:
+
+- safety scanner, palette ranking, prompt classifier, macros
+- smart-context kinds, TTS summariser, history, bookmarks
+- shell-exec formatter, theme integrity, wake-phrase matcher, config validator
+- workflows, prompt queue/stash, notify-rules, config-share
+- usage-meter, file-picker, handoff
+
+## Repository layout
+
+```
+bin/copilot+              CLI entry — flag dispatch, --setup / --doctor / --monitor / …
+src/wrapper.js            PTY wrapper, hotkeys, queue flush, plugin emit
+src/*.js                  Feature modules (voice, palette, monitor, workflows, …)
+scripts/postinstall.js    chmod node-pty helpers after npm install (darwin/linux)
+tests/                    Zero-dep suite + tests/run.js
+docs/superpowers/specs/   Dated design notes (historical; see the file dates)
+Formula/copilot-plus.rb   Homebrew formula snapshot (tap is a separate repo)
+.github/workflows/        Release publish only (no PR test workflow)
+package.json              Manifest, bin, engines, npm files whitelist
+```
+
+Published npm contents (`package.json` `files`): `bin/`, `src/`, `scripts/` (plus npm’s always-included `package.json` / README / LICENSE). Tests, Formula, docs, and models are not in the tarball.
+
+Runtime state on the machine (not in git):
+
+| Path | What |
+|---|---|
+| `~/.copilot/copilot-plus.json` | User config |
+| `~/.copilot/history.jsonl` | Prompt log |
+| `~/.copilot/bookmarks.json` | Bookmarks |
+| `~/.copilot/prompt-stash.json` | Stashed drafts |
+| `~/.copilot/copilot-plus.log` | Wrapper log |
+| `~/.copilot/agents/<pid>.json` | Live session state for `--monitor` |
+| `~/.copilot/workflows/` | YAML/JSON workflow chains |
+| `~/.copilot/plugins/` | User `*.js` / `*.cjs` hooks |
+| `~/.copilot/handoffs/` | Quota handoff markdown |
+| `~/.copilot/models/` | Local whisper models |
+| `<repo>/.copilot-worktrees/` | Isolated git worktrees from `--worktree` |
+
+## Release / deploy
+
+There is no app server. Shipping is **npm** plus an optional **Homebrew tap** update.
+
+1. Bump `version` in `package.json` / `package-lock.json` and record the release in [CHANGELOG.md](CHANGELOG.md).
+2. Push a git tag matching `v*` (for example `v1.2.0`) to `main`, or run the **Release** workflow with a tag input.
+3. [`.github/workflows/release.yml`](.github/workflows/release.yml) on `ubuntu-latest`:
+   - `actions/setup-node@v4` with Node **20** and the npm registry
+   - `npm ci --ignore-scripts`
+   - `npm publish --access public` using `NPM_TOKEN`
+   - then (best-effort) patch `url` / `sha256` in [Errr0rr404/homebrew-copilot-plus](https://github.com/Errr0rr404/homebrew-copilot-plus) using `HOMEBREW_TAP_TOKEN`
+
+Users install with `npm install -g copilot-plus` or `brew tap Errr0rr404/copilot-plus && brew install copilot-plus`.
 
 ---
 
@@ -900,3 +1020,7 @@ See [ROADMAP.md](ROADMAP.md) for planned features and future direction.
 ## Contributing
 
 Found a bug or have a feature idea? [Open an issue](https://github.com/Errr0rr404/copilot-plus/issues) — PRs welcome.
+
+```bash
+npm test
+```

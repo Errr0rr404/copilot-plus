@@ -1,11 +1,11 @@
 # copilot+ — Roadmap
 
 > Feature proposals and future direction for copilot-plus.
-> Current version: **v1.2.0** · See [CHANGELOG.md](CHANGELOG.md) for release history.
+> Current version: **v1.2.0** · Living user docs: [README.md](README.md) · Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ## Architecture
 
-Node.js PTY wrapper (`node-pty`) that intercepts stdin/stdout, injects text/commands into the underlying `copilot` process, and coordinates multi-instance state via `~/.copilot/agents/*.json` files. A plugin layer exposes lifecycle hooks (`beforeSend`, `afterReceive`, `afterPrompt`, `onModelSwitch`, `onBookmark`) loaded from `~/.copilot/plugins/`.
+Node.js PTY wrapper (`node-pty`) that intercepts stdin/stdout, injects text/commands into the underlying `copilot` process, and coordinates multi-instance state via `~/.copilot/agents/*.json` files. A plugin layer exposes lifecycle hooks (`beforeSend`, `afterReceive`, `afterPrompt`, `onModelSwitch`, `onBookmark`) loaded from `~/.copilot/plugins/` (`*.js` / `*.cjs`).
 
 ## What Copilot CLI Already Provides Natively
 
