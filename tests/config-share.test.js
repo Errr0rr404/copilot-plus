@@ -32,8 +32,16 @@ it('export + import merge', () => {
   share.exportToFile({ theme: 'solarized', macros: { 1: 'a', 2: '' } }, file);
   const res = share.importFromFile(file, { theme: 'dark', macros: { 1: 'keep', 2: 'b' } }, { overwrite: false });
   eq(res.patch.theme, 'solarized');
-  // merge keeps local keys and overlays
   eq(res.config.macros[1], 'a');
+  eq(res.config.macros[2], 'b');
+});
+
+it('export strips webhookUrl', () => {
+  const pkg = share.buildPackage({
+    theme: 'dark',
+    notifications: { quiet: false, webhookUrl: 'https://hooks.example/secret' },
+  });
+  eq(pkg.config.notifications.webhookUrl, undefined);
 });
 
 it('rejects invalid package', () => {

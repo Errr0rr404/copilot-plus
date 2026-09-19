@@ -27,6 +27,38 @@ function _inputArgs(device) {
   return ['-f', 'pulse', '-i', src];
 }
 
+function _ignoreStdinErrors(proc) {
+  if (proc && proc.stdin) proc.stdin.on('error', () => {});
+}
+
+function _forceKillFfmpeg(proc) {
+  return new Promise(resolve => {
+    if (!IS_WIN) {
+      try { proc.kill('SIGTERM'); } catch {}
+      setTimeout(resolve, 200);
+      return;
+    }
+    const killer = spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
+    const done = () => { clearTimeout(fallback); resolve(); };
+    const fallback = setTimeout(done, 2000);
+    killer.once('exit', done);
+    killer.once('error', done);
+  });
+}
+
+function _waitForFfmpegStop(proc) {
+  return new Promise(resolve => {
+    try { proc.stdin.write('q'); proc.stdin.end(); } catch {}
+    const finish = () => { clearTimeout(timer); resolve(); };
+    const timer = setTimeout(() => {
+      _forceKillFfmpeg(proc).then(resolve);
+    }, 3000);
+    proc.once('exit', finish);
+    proc.once('close', finish);
+    proc.once('error', finish);
+  });
+}
+
 class VoiceRecorder {
   constructor(config) {
     this.config = config;
@@ -56,6 +88,7 @@ class VoiceRecorder {
     this._proc = spawn('ffmpeg', ffmpegArgs, {
       stdio: ['pipe', 'ignore', 'ignore'],
     });
+    _ignoreStdinErrors(this._proc);
 
     this._proc.on('error', () => {
       this._cleanup();
@@ -101,6 +134,7 @@ class VoiceRecorder {
       let stderrBuf = '';
       const proc = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'ignore', 'pipe'] });
       this._proc = proc;
+      _ignoreStdinErrors(proc);
 
       let _qSent = false;
       proc.stderr.on('data', chunk => {
@@ -114,8 +148,7 @@ class VoiceRecorder {
         });
         if (hasSilenceStart) {
           _qSent = true;
-          proc.stdin.write('q');
-          proc.stdin.end();
+          try { proc.stdin.write('q'); proc.stdin.end(); } catch {}
         }
       });
 
@@ -152,22 +185,7 @@ class VoiceRecorder {
     // an 'exit' listener after the event has fired would hang forever.
     if (proc.exitCode === null && proc.signalCode === null) {
       // Ask ffmpeg to stop gracefully — it finalises the WAV header before exit
-      await new Promise((resolve) => {
-        try { proc.stdin.write('q'); proc.stdin.end(); } catch {}
-        const finish = () => { clearTimeout(timer); resolve(); };
-        const timer = setTimeout(() => {
-          if (IS_WIN) {
-            spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
-          } else {
-            try { proc.kill('SIGTERM'); } catch {}
-          }
-          // Resolve regardless so we never hang on a stuck process.
-          setTimeout(resolve, 200);
-        }, 3000);
-        proc.once('exit', finish);
-        proc.once('close', finish);
-        proc.once('error', finish);
-      });
+      await _waitForFfmpegStop(proc);
     }
 
     if (!fs.existsSync(audioFile)) {

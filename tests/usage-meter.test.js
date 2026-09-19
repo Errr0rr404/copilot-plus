@@ -31,6 +31,12 @@ it('shouldHandoff at threshold', () => {
   eq(usage.shouldHandoff({ premium: { unlimited: true, used: 0, entitlement: 0 } }, 90), false);
 });
 
+it('summary maps plan from quota.plan', () => {
+  const sum = usage.summary({ plan: 'individual', premium: { used: 2, entitlement: 10 } });
+  eq(sum.premium.planName, 'individual');
+  ok(usage.formatCli(sum).includes('plan: individual'));
+});
+
 it('summary includes budget when set', () => {
   history.clear();
   history.append({ prompt: 'x' });

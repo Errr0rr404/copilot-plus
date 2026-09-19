@@ -10,6 +10,12 @@ const PLATFORM = os.platform();
 const IS_WIN   = PLATFORM === 'win32';
 const IS_MAC   = PLATFORM === 'darwin';
 
+function _isFatalListenError(err) {
+  if (!err) return false;
+  if (err.code === 'ENOENT') return true;
+  return /No whisper model|No audio device/.test(String(err.message));
+}
+
 /** Build ffmpeg input args for the current platform. Mirrors voice.js. */
 function _inputArgs(device) {
   if (IS_WIN) return ['-f', 'dshow', '-i', `audio=${device}`];
@@ -72,6 +78,7 @@ class WakeWordListener extends EventEmitter {
       throw new Error('No whisper model found. Run: copilot+ --setup');
     }
     this._listening = true;
+    this._errorDelay = 100;
     this._scheduleChunk();
   }
 
@@ -81,10 +88,9 @@ class WakeWordListener extends EventEmitter {
     if (this._ffmpeg) { try { this._ffmpeg.kill('SIGTERM'); } catch {} this._ffmpeg = null; }
   }
 
-  _scheduleChunk() {
+  _scheduleChunk(delayMs = 100) {
     if (!this._listening) return;
-    // Stagger slightly so we don't flood on fast machines
-    this._loopTimer = setTimeout(() => this._runChunk(), 100);
+    this._loopTimer = setTimeout(() => this._runChunk(), delayMs);
   }
 
   async _runChunk() {
@@ -93,6 +99,7 @@ class WakeWordListener extends EventEmitter {
 
     const chunkSecs = this.config.wakeWord.chunkSeconds || 2;
     const audioFile = path.join(os.tmpdir(), `copilot-wake-${Date.now()}.wav`);
+    let ok = false;
 
     try {
       await this._record(audioFile, chunkSecs);
@@ -101,15 +108,24 @@ class WakeWordListener extends EventEmitter {
 
       const text = await this._transcribe(audioFile);
       if (text && this._listening) this.emit('heard', text);
-      if (this._matchesWakePhrase(text)) {
+      if (this._listening && this._matchesWakePhrase(text)) {
         this.emit('detected');
       }
+      ok = true;
+      this._errorDelay = 100;
     } catch (err) {
       if (this._listening) this.emit('error', err);
+      if (_isFatalListenError(err)) {
+        this._listening = false;
+        return;
+      }
+      this._errorDelay = Math.min(30000, (this._errorDelay || 400) * 2);
     } finally {
       fs.unlink(audioFile, () => {});
       this._busy = false;
-      this._scheduleChunk();
+      if (this._listening) {
+        this._scheduleChunk(ok ? 100 : (this._errorDelay || 2000));
+      }
     }
   }
 

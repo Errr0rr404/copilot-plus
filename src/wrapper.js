@@ -34,6 +34,7 @@ const handoff      = require('./handoff');
 const usageMeter   = require('./usage-meter');
 const worktree     = require('./worktree');
 const { fetchQuota } = require('./copilot-api');
+const { sanitizeInjectedText, formatAtPath } = require('./text-inject');
 
 // Shared file used to coordinate wake word activation across multiple copilot+ instances.
 const ACTIVE_PID_FILE = path.join(os.homedir(), '.copilot', 'copilot-plus-active.pid');
@@ -121,7 +122,14 @@ function classifyPrompt(prompt) {
 function resolveBin(name) {
   try {
     const cmd = IS_WIN ? 'where' : 'which';
-    return execFileSync(cmd, [name], { encoding: 'utf8' }).trim().split(/\r?\n/)[0];
+    const lines = execFileSync(cmd, [name], { encoding: 'utf8' })
+      .trim().split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    if (!lines.length) return name;
+    if (IS_WIN) {
+      const withExt = lines.find(l => /\.(cmd|exe|bat)$/i.test(l));
+      return withExt || lines[0];
+    }
+    return lines[0];
   } catch {
     return name;
   }
@@ -174,6 +182,9 @@ class CopilotWrapper {
     this._notifyCooldown = notifyRules.createCooldown(90000);
     this._handoffFired = false;
     this._quotaTimer = null;
+    this._inputSuspended = false;
+    this._onStdin = null;
+    this._submitting = false;
   }
 
   start() {
@@ -224,10 +235,12 @@ class CopilotWrapper {
         try { process.stdin.setRawMode(false); } catch {}
         if (this._quotaTimer) clearInterval(this._quotaTimer);
       });
-      process.stdin.on('data', data => {
+      this._onStdin = data => {
+        if (this._inputSuspended) return;
         this._markActive();
         this._handleInput(data);
-      });
+      };
+      process.stdin.on('data', this._onStdin);
     } else {
       process.stdin.on('data', data => {
         shell.write(data.toString());
@@ -306,7 +319,7 @@ class CopilotWrapper {
           body: 'Response ready',
         });
         this._resolveSettleWaiters();
-        this._flushQueueNext();
+        if (!this._workflowRunning) this._flushQueueNext();
       }
     }, 800);
 
@@ -389,11 +402,7 @@ class CopilotWrapper {
     if (macroSlot !== null) {
       const prompt = this.macros.get(macroSlot);
       if (prompt) {
-        const payload = this.plugins.emit('beforeSend', { text: prompt, kind: 'macro', cancel: false });
-        if (payload && !payload.cancel) {
-          const send = payload.replaceWith || payload.text;
-          this._sendUserText(send, { kind: 'macro' });
-        }
+        this._sendUserText(prompt, { kind: 'macro' });
         this._notify(`⌨️ Macro ${macroSlot}`, prompt.length > 50 ? prompt.slice(0, 47) + '…' : prompt);
       } else {
         this._notify(`⌨️ Macro ${macroSlot}`, '(empty — set it via Ctrl+K)');
@@ -477,67 +486,20 @@ class CopilotWrapper {
         return;
       }
 
-      // Normal submit path — run safety / plugins / history
+      // Normal submit path — safety / plugins / history
       const sendText = this._inputLineBuf;
       if (!this._inputLineDirty && sendText.trim()) {
-        const payload = this.plugins.emit('beforeSend', { text: sendText, kind: 'prompt', cancel: false });
-        if (payload && payload.cancel) { this._resetInputLine(); return; }
-        const finalText = (payload && payload.replaceWith) || payload.text || sendText;
-
-        if (finalText !== sendText) {
-          // Plugin rewrote the text — clear the visible line and inject the new text.
-          this._shell.write('\x15' + finalText + '\r');
-          this._afterSubmit(finalText);
-          this._resetAutoInputTracking();
-          this._resetInputLine();
-          return;
-        }
-
-        // Safety scan
-        const findings = this.cfg.safety && this.cfg.safety.enabled !== false
-          ? safety.scan(finalText, { disabledKinds: (this.cfg.safety && this.cfg.safety.disabledKinds) || [] })
-          : [];
-        if (findings.length) {
-          if (this.cfg.safety && this.cfg.safety.autoRedact) {
-            const redacted = safety.redact(finalText, findings);
-            this._shell.write('\x15' + redacted + '\r');
-            this._afterSubmit(redacted);
-            this._notify('🔒 Redacted secrets', findings.map(f => f.kind).join(', '));
-            this._resetAutoInputTracking();
-            this._resetInputLine();
-            return;
-          }
-          // Interactive confirm — pauses the wrapper briefly
-          this._confirmSafety(findings).then(action => {
-            if (action === 'cancel') {
-              this._shell.write('\x15');
-              this._notify('🔒 Cancelled', 'prompt held back');
-              this._resetAutoInputTracking();
-              this._resetInputLine();
-              return;
-            }
-            const out = action === 'redact' ? safety.redact(finalText, findings) : finalText;
-            this._shell.write('\x15' + out + '\r');
-            this._afterSubmit(out);
-            this._resetAutoInputTracking();
-            this._resetInputLine();
-          });
-          return;
-        }
-        this._afterSubmit(finalText);
-        this._resetAutoInputTracking();
-        this._resetInputLine();
-      } else {
-        // Empty Enter or dirty buffer — let it through unchanged
-        this._resetAutoInputTracking();
-        this._resetInputLine();
-        this._exchanges++;
-        agentState.writeState(this._pid, {
-          lastInputAt: new Date().toISOString(),
-          exchanges: this._exchanges,
-          status: 'idle',
-        });
+        this._submitPrompt(sendText, { kind: 'prompt', alreadyOnLine: true });
+        return;
       }
+      this._resetAutoInputTracking();
+      this._resetInputLine();
+      this._exchanges++;
+      agentState.writeState(this._pid, {
+        lastInputAt: new Date().toISOString(),
+        exchanges: this._exchanges,
+        status: 'idle',
+      });
     }
 
     this._shell.write(key);
@@ -573,32 +535,139 @@ class CopilotWrapper {
 
   /** Send user-generated text to the shell, optionally auto-submitting. */
   _sendUserText(text, { kind = 'prompt' } = {}) {
-    if (!text) return;
-    if (this.cfg.autoSubmit) this._resetAutoInputTracking();
-    else this._markAutoInputDirty();
-    this._shell.write(text + (this.cfg.autoSubmit ? '\r' : ''));
+    const safe = sanitizeInjectedText(text);
+    if (!safe) return;
     if (this.cfg.autoSubmit) {
-      this._afterSubmit(text);
+      this._submitPrompt(safe, { kind, alreadyOnLine: false });
+      return;
+    }
+    this._injectUserText(safe);
+  }
+
+  _injectUserText(text) {
+    const safe = sanitizeInjectedText(text);
+    if (!safe) return '';
+    this._markAutoInputDirty();
+    this._shell.write(safe);
+    this._inputLineBuf = safe;
+    this._inputCursor = safe.length;
+    this._inputLineDirty = false;
+    return safe;
+  }
+
+  _detachStdinListener() {
+    if (!this._onStdin) return;
+    try { process.stdin.removeListener('data', this._onStdin); } catch {}
+  }
+
+  _pausePtyInput() {
+    this._inputSuspended = true;
+    this._detachStdinListener();
+    try { process.stdin.setRawMode(false); } catch {}
+  }
+
+  _resumePtyInput() {
+    this._inputSuspended = false;
+    try { process.stdin.setRawMode(true); } catch {}
+    this._detachStdinListener();
+    if (this._onStdin) process.stdin.on('data', this._onStdin);
+    try { process.stdin.resume(); } catch {}
+  }
+
+  _abortSubmit(alreadyOnLine) {
+    if (alreadyOnLine) this._shell.write('\x15');
+    this._resetInputLine();
+    this._resetAutoInputTracking();
+    return false;
+  }
+
+  /**
+   * Single submit path used by typed Enter, voice auto-submit, macros, queue, and workflows.
+   * Runs plugins then the safety scanner, then writes to the PTY.
+   */
+  async _submitPrompt(text, { kind = 'prompt', alreadyOnLine = false, preamble = '' } = {}) {
+    if (this._submitting) return false;
+    this._submitting = true;
+    const original = text;
+    try {
+      const payload = this.plugins.emit('beforeSend', { text, kind, cancel: false });
+      if (!payload || payload.cancel) return this._abortSubmit(alreadyOnLine);
+
+      let finalText = original;
+      if (typeof payload.replaceWith === 'string') finalText = payload.replaceWith;
+      else if (typeof payload.text === 'string') finalText = payload.text;
+      finalText = sanitizeInjectedText(finalText);
+      if (!finalText.trim()) return this._abortSubmit(alreadyOnLine);
+
+      const safetyCfg = this.cfg.safety;
+      const findings = (safetyCfg && safetyCfg.enabled !== false)
+        ? safety.scan(finalText, { disabledKinds: safetyCfg.disabledKinds || [] })
+        : [];
+      if (findings.length) {
+        if (safetyCfg && safetyCfg.autoRedact) {
+          finalText = safety.redact(finalText, findings);
+          this._notify('🔒 Redacted secrets', findings.map(f => f.kind).join(', '));
+        } else {
+          const action = await this._confirmSafety(findings);
+          if (action === 'cancel') {
+            this._shell.write('\x15');
+            this._notify('🔒 Cancelled', 'prompt held back');
+            this._resetAutoInputTracking();
+            this._resetInputLine();
+            return false;
+          }
+          if (action === 'redact') finalText = safety.redact(finalText, findings);
+        }
+      }
+
+      if (preamble) this._shell.write(preamble + finalText + '\r');
+      else if (!alreadyOnLine || finalText !== original) this._shell.write('\x15' + finalText + '\r');
+      else this._shell.write('\r');
+      this._afterSubmit(finalText);
+      this._resetAutoInputTracking();
       this._resetInputLine();
-    } else {
-      this._inputLineBuf  = text;
-      this._inputCursor   = text.length;
-      this._inputLineDirty = false;
+      return true;
+    } finally {
+      this._submitting = false;
     }
   }
 
   _confirmSafety(findings) {
-    // Pause raw mode while readline takes over
-    try { process.stdin.setRawMode(false); } catch {}
-    return safety.confirm(findings).then(action => {
-      try { process.stdin.setRawMode(true); } catch {}
-      return action;
-    });
+    this._pausePtyInput();
+    return safety.confirm(findings).finally(() => this._resumePtyInput());
+  }
+
+  _spawnInteractiveEditor(filePath, { onExit, onError } = {}) {
+    const editor = process.env.VISUAL || process.env.EDITOR || (IS_WIN ? 'notepad' : 'vi');
+    const parts = editor.split(/\s+/);
+    try {
+      this._pausePtyInput();
+      const child = spawn(parts[0], [...parts.slice(1), filePath], {
+        stdio: 'inherit',
+        shell: IS_WIN,
+      });
+      child.on('exit', () => {
+        this._resumePtyInput();
+        this._nudgeResize();
+        if (onExit) onExit();
+      });
+      child.on('error', err => {
+        this._resumePtyInput();
+        if (onError) onError(err);
+      });
+    } catch (err) {
+      this._resumePtyInput();
+      if (onError) onError(err);
+    }
   }
 
   _openCheatSheet() {
     if (this._busy) return;
-    this.cheatsheet.open(this.cfg).then(() => this._nudgeResize());
+    try {
+      this.cheatsheet.open(this.cfg).then(() => this._nudgeResize()).catch(() => {});
+    } catch (err) {
+      logger.warn('cheatsheet failed', err);
+    }
   }
 
   _openPalette() {
@@ -736,7 +805,7 @@ class CopilotWrapper {
           config.patch({ macros: { [slot]: result.value } });
           this._notify(`⌨️ Macro ${slot} saved`,
             result.value.length > 50 ? result.value.slice(0, 47) + '…' : result.value || '(cleared)');
-          if (result.run && result.value) this._shell.write(result.value + (this.cfg.autoSubmit ? '\r' : ''));
+          if (result.run && result.value) this._sendUserText(result.value, { kind: 'macro' });
           return;
         }
         return;
@@ -849,16 +918,14 @@ class CopilotWrapper {
   _injectAutoModel(prompt) {
     const target = selectAutoModel(prompt, this.cfg);
     const tier   = classifyPrompt(prompt);
-    this._afterSubmit(prompt);
-
+    let preamble = '';
     if (target && target !== this._currentModel) {
       this._currentModel = target;
       agentState.writeState(this._pid, { model: this._resolveCurrentModel() });
-      this._shell.write(`\x15/model ${target}\r${prompt}\r`);
+      preamble = `\x15/model ${target}\r`;
       this._notify(`⚡ Auto → ${target}`, `${tier} prompt`);
-    } else {
-      this._shell.write('\r');
     }
+    this._submitPrompt(prompt, { kind: 'prompt', alreadyOnLine: true, preamble });
   }
 
   _resetAutoInputTracking() {
@@ -958,7 +1025,7 @@ class CopilotWrapper {
     const img = clipboard.readImage();
     if (img) {
       this._markAutoInputDirty();
-      this._shell.write(`@${img} `);
+      this._shell.write(formatAtPath(img));
       this._notify('📋 Clipboard image', img);
       this._nudgeResize();
       return;
@@ -1051,28 +1118,10 @@ class CopilotWrapper {
       this._notify('📝 Write failed', logger.forUser(err, 60));
       return;
     }
-    const editor = process.env.VISUAL || process.env.EDITOR || (IS_WIN ? 'notepad' : 'vi');
-    const parts = editor.split(/\s+/);
-    try {
-      // Leave raw mode so the editor can take the TTY
-      try { process.stdin.setRawMode(false); } catch {}
-      const child = spawn(parts[0], [...parts.slice(1), tmp], {
-        stdio: 'inherit',
-        shell: IS_WIN,
-      });
-      child.on('exit', () => {
-        try { process.stdin.setRawMode(true); } catch {}
-        this._nudgeResize();
-        this._notify('📝 Editor closed', path.basename(tmp));
-      });
-      child.on('error', err => {
-        try { process.stdin.setRawMode(true); } catch {}
-        this._notify('📝 Editor failed', logger.forUser(err, 60));
-      });
-    } catch (err) {
-      try { process.stdin.setRawMode(true); } catch {}
-      this._notify('📝 Editor failed', logger.forUser(err, 60));
-    }
+    this._spawnInteractiveEditor(tmp, {
+      onExit: () => this._notify('📝 Editor closed', path.basename(tmp)),
+      onError: err => this._notify('📝 Editor failed', logger.forUser(err, 60)),
+    });
   }
 
   _pickFile() {
@@ -1082,8 +1131,7 @@ class CopilotWrapper {
       this._notify('📎 No files found', 'Empty project?');
       return;
     }
-    // Reuse palette as a file chooser
-    const actions = files.slice(0, 200).map(rel => ({
+    const actions = files.slice(0, 1500).map(rel => ({
       id: `file:${rel}`,
       label: `📎  ${rel}`,
       hint: '',
@@ -1095,40 +1143,44 @@ class CopilotWrapper {
       const rel = result.slice('file:'.length);
       const abs = path.resolve(process.cwd(), rel);
       this._markAutoInputDirty();
-      this._shell.write(`@${abs} `);
+      this._shell.write(formatAtPath(abs));
       this._notify('📎 Attached', rel);
     });
   }
 
   _flushQueueNext(force = false) {
-    if (!force && this._awaitingResponse) return;
+    if (!force && (this._awaitingResponse || this._workflowRunning)) return;
     const item = this.promptQueue.dequeue();
     if (!item) {
       if (force) this._notify('📥 Queue empty', '');
       return;
     }
     this._notify('📤 Dequeued', item.text.length > 50 ? item.text.slice(0, 47) + '…' : item.text);
-    // Auto-submit queued prompts
-    this._shell.write('\x15' + item.text + '\r');
-    this._afterSubmit(item.text);
-    this._resetInputLine();
+    this._submitPrompt(item.text, { kind: 'queue', alreadyOnLine: false });
   }
 
-  _waitForSettle() {
+  _waitForSettle(timeoutMs = 180000) {
     return new Promise(resolve => {
-      // If already idle, resolve after a short quiet period
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      const timer = setTimeout(done, timeoutMs);
+      const wrapped = () => { clearTimeout(timer); done(); };
       if (!this._awaitingResponse) {
         const start = Date.now();
         const t = setInterval(() => {
           if (this._awaitingResponse || Date.now() - start > 1200) {
             clearInterval(t);
-            if (!this._awaitingResponse) return resolve();
-            this._settleWaiters.push(resolve);
+            if (!this._awaitingResponse) return wrapped();
+            this._settleWaiters.push(wrapped);
           }
         }, 100);
         return;
       }
-      this._settleWaiters.push(resolve);
+      this._settleWaiters.push(wrapped);
     });
   }
 
@@ -1162,9 +1214,7 @@ class CopilotWrapper {
           this._notify(`⛓ Step ${i + 1}/${total}`, wf.name);
         },
         send: async (prompt) => {
-          this._shell.write('\x15' + prompt + '\r');
-          this._afterSubmit(prompt);
-          this._resetInputLine();
+          await this._submitPrompt(prompt, { kind: 'workflow', alreadyOnLine: false });
         },
         waitForSettle: () => this._waitForSettle(),
       });
@@ -1212,19 +1262,9 @@ class CopilotWrapper {
   _openHandoff() {
     const p = handoff.latestPath();
     if (!p) { this._notify('📦 No handoffs', ''); return; }
-    const editor = process.env.VISUAL || process.env.EDITOR || (IS_WIN ? 'notepad' : 'vi');
-    const parts = editor.split(/\s+/);
-    try {
-      try { process.stdin.setRawMode(false); } catch {}
-      const child = spawn(parts[0], [...parts.slice(1), p], { stdio: 'inherit', shell: IS_WIN });
-      child.on('exit', () => {
-        try { process.stdin.setRawMode(true); } catch {}
-        this._nudgeResize();
-      });
-    } catch (err) {
-      try { process.stdin.setRawMode(true); } catch {}
-      this._notify('📦 Open failed', logger.forUser(err, 60));
-    }
+    this._spawnInteractiveEditor(p, {
+      onError: err => this._notify('📦 Open failed', logger.forUser(err, 60)),
+    });
   }
 
   _fireNotifyEvent(event) {
@@ -1315,7 +1355,7 @@ class CopilotWrapper {
           if (phrase && cleaned.toLowerCase().startsWith(phrase)) {
             cleaned = cleaned.slice(phrase.length).replace(/^[\s,.:]+/, '');
           }
-          this._handleVoiceResult(cleaned, 'wake');
+          return this._handleVoiceResult(cleaned, 'wake');
         } else {
           this._notify('⚠️ Nothing heard', 'Speak right after the wake phrase');
         }
@@ -1343,7 +1383,7 @@ class CopilotWrapper {
       .then(text => {
         this._setTitle('copilot');
         agentState.writeState(this._pid, { status: 'idle' });
-        this._handleVoiceResult(text, 'manual');
+        return this._handleVoiceResult(text, 'manual');
       })
       .catch(err => {
         this._setTitle('copilot');
@@ -1363,27 +1403,21 @@ class CopilotWrapper {
    * If voicePreview is enabled, we drop the text into the input buffer
    * without sending (user reviews + edits + Enter). Else we send normally.
    */
-  _handleVoiceResult(text, source) {
+  async _handleVoiceResult(text, source) {
     if (!text) { this._notify('⚠️ Nothing heard', 'Try speaking more clearly'); return; }
-    const payload = this.plugins.emit('beforeSend', { text, kind: 'voice', cancel: false });
-    if (payload && payload.cancel) { this._notify('🛑 Voice cancelled by plugin', ''); return; }
-    const finalText = (payload && payload.replaceWith) || payload.text || text;
+    const preview = text.length > 80 ? text.slice(0, 77) + '…' : text;
 
-    if (this.cfg.voicePreview) {
-      // Type into the prompt but DO NOT submit. The user reviews/edits/Enter.
-      this._markAutoInputDirty();
-      this._shell.write(finalText);
-      this._inputLineBuf  = finalText;
-      this._inputCursor   = finalText.length;
-      this._inputLineDirty = false;
-      this._notify('✏️  Voice ready', 'Press Enter to send, edit first if needed');
+    if (this.cfg.voicePreview || !this.cfg.autoSubmit) {
+      this._injectUserText(text);
+      if (this.cfg.voicePreview) {
+        this._notify('✏️  Voice ready', 'Press Enter to send, edit first if needed');
+      } else {
+        this._notify('✅ Done', preview);
+      }
       return;
     }
-    if (this.cfg.autoSubmit) this._resetAutoInputTracking();
-    else this._markAutoInputDirty();
-    this._shell.write(finalText + (this.cfg.autoSubmit ? '\r' : ''));
-    if (this.cfg.autoSubmit) this._afterSubmit(finalText);
-    this._notify('✅ Done', finalText.length > 80 ? finalText.slice(0, 77) + '…' : finalText);
+    const sent = await this._submitPrompt(text, { kind: 'voice', alreadyOnLine: false });
+    if (sent) this._notify('✅ Done', preview);
   }
 
   _doScreenshot() {
@@ -1397,7 +1431,7 @@ class CopilotWrapper {
         this._setTitle('copilot');
         if (filePath) {
           this._markAutoInputDirty();
-          this._shell.write(`@${filePath} `);
+          this._shell.write(formatAtPath(filePath));
           this._notify('✅ Screenshot attached', filePath);
           this._nudgeResize();
         } else {
@@ -1487,3 +1521,5 @@ function _version() {
 module.exports = CopilotWrapper;
 module.exports._selectAutoModel = selectAutoModel;
 module.exports._classifyPrompt = classifyPrompt;
+module.exports.sanitizeInjectedText = sanitizeInjectedText;
+module.exports.formatAtPath = formatAtPath;

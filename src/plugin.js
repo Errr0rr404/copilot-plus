@@ -83,7 +83,7 @@ class PluginManager {
       if (typeof fn !== 'function') continue;
       try {
         const out = fn(payload);
-        if (out !== undefined) payload = out;
+        if (out !== null && typeof out === 'object') payload = out;
       } catch (err) {
         logger.warn(`plugin "${p.name}" threw in ${hook}:`, err);
       }

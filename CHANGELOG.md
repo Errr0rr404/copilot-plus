@@ -4,6 +4,45 @@ All notable changes to **copilot-plus** are documented here.
 
 ---
 
+## [1.2.1] — 2026-09-19
+
+Bugfix release: crashes, missed safety scans, and a few sharp edges on
+Windows/Linux.
+
+### Fixed
+
+- **Safety scanner** now runs on voice auto-submit, macros, queued prompts,
+  workflows, Auto Mode, and plugin rewrites — not only typed Enter.
+- **`modelPath` auto-detect** no longer gets wiped when the config file omits
+  the key (voice “No whisper model found” despite a model on disk).
+- **Cheatsheet** no longer throws `RangeError` in a narrow split pane.
+- Safety confirm and `$EDITOR` no longer share keystrokes with the Copilot PTY.
+- Default voice path updates the input shadow buffer so history, queue, and
+  safety see the spoken prompt on Enter.
+- Multiline clipboard/macro text is flattened so Copilot does not treat
+  newlines as extra submits.
+- `@path` attachments with spaces are quoted; Wayland `grim`+`slurp` quoting
+  no longer word-splits the geometry.
+- Ctrl+O lists up to 1500 project files (was the first 200 git paths).
+- Config export omits `notifications.webhookUrl`; merge no longer wipes local
+  macros/models with empty remote slots.
+- Wake-word missing ffmpeg/model stops instead of notifying every ~2s;
+  ffmpeg stdin EPIPE no longer crashes the process.
+- Windows monitor no longer matches `copilot-language-server`; `where copilot`
+  prefers `.cmd`/`.exe`.
+- `--usage` shows the Copilot plan name; daily budget uses local calendar dates.
+- Plugin `beforeSend` returning `null` no longer throws on submit.
+- Linux `--help-plus` shows Ctrl+Shift / Ctrl, not macOS Option keys.
+- Leftover `.copilot-worktrees/<name>` dirs are no longer reported as a valid
+  worktree; workflow wait has a timeout and does not flush the user queue
+  between steps.
+
+### Docs
+
+- README trimmed to install, hotkeys, config, and troubleshooting.
+
+---
+
 ## [1.2.0] — 2026-08-01
 
 Community-driven release: features people most often wish GitHub Copilot CLI

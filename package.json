@@ -1,6 +1,6 @@
 {
   "name": "copilot-plus",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Voice + screenshots + smart context + clipboard + shell + TTS + history + bookmarks + workflows + queue + plugins — drop-in wrapper for GitHub Copilot CLI",
   "bin": {
     "copilot+": "bin/copilot+"

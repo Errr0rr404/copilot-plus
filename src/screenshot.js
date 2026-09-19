@@ -11,7 +11,9 @@ const IS_WIN   = PLATFORM === 'win32';
 const IS_MAC   = PLATFORM === 'darwin';
 const SCREENSHOTS_DIR = path.join(os.tmpdir(), 'copilot-screenshots');
 
-fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
+function _ensureDir() {
+  try { fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true }); } catch {}
+}
 
 /**
  * Launch an interactive screenshot picker.
@@ -19,6 +21,7 @@ fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
  * @returns {Promise<string|null>}
  */
 function capture() {
+  _ensureDir();
   if (IS_WIN) return captureWindows();
   if (IS_MAC) return captureMac();
   return captureLinux();
@@ -110,7 +113,7 @@ function captureLinux() {
   const filePath = path.join(SCREENSHOTS_DIR, `screenshot-${Date.now()}.png`);
 
   const candidates = [
-    () => _runIfAvailable('grim', ['-g', _sh('slurp'), filePath], { needsBin: 'grim' }),
+    () => _runIfAvailable('sh', ['-c', 'grim -g "$(slurp)" "$1"', 'grim', filePath], { needsAll: ['grim', 'slurp'] }),
     () => _runIfAvailable('gnome-screenshot', ['-a', '-f', filePath]),
     () => _runIfAvailable('spectacle', ['-r', '-b', '-n', '-o', filePath]),
     () => _runIfAvailable('scrot', ['-s', filePath]),
@@ -126,23 +129,18 @@ function captureLinux() {
   });
 }
 
-function _sh(cmd) {
-  // Embeds a shell sub-command using process substitution-style fallback —
-  // safe because we only invoke it via spawn with shell:true below.
-  return `$(${cmd})`;
-}
-
 async function _runIfAvailable(bin, args, opts = {}) {
-  const which = spawnSync('which', [opts.needsBin || bin], { encoding: 'utf8' });
-  if (which.status !== 0) return false;
+  const needed = opts.needsAll || [opts.needsBin || bin];
+  if (!needed.every(_binOnPath)) return false;
   return new Promise(resolve => {
-    const useShell = args.some(a => a.includes('$('));
-    const proc = useShell
-      ? spawn(`${bin} ${args.join(' ')}`, { shell: true, stdio: 'inherit' })
-      : spawn(bin, args, { stdio: 'inherit' });
+    const proc = spawn(bin, args, { stdio: 'inherit' });
     proc.on('exit', code => resolve(code === 0));
     proc.on('error', () => resolve(false));
   });
+}
+
+function _binOnPath(bin) {
+  return spawnSync('which', [bin], { encoding: 'utf8' }).status === 0;
 }
 
 module.exports = { capture };

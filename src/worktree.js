@@ -58,7 +58,10 @@ function create(opts = {}) {
   const wtPath = path.join(wtParent, name);
 
   if (fs.existsSync(wtPath)) {
-    return { ok: true, path: wtPath, branch: newBranch, existed: true };
+    if (isGitRepo(wtPath)) {
+      return { ok: true, path: wtPath, branch: currentBranch(wtPath), existed: true };
+    }
+    return { ok: false, error: `path exists but is not a git worktree: ${wtPath}` };
   }
 
   try {

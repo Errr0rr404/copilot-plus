@@ -13,6 +13,7 @@ const os   = require('os');
 const path = require('path');
 
 const PACKAGE_VERSION = 1;
+const SLOT_KEYS = new Set(['macros', 'workhorseModels', 'autoModels']);
 
 const EXPORT_KEYS = [
   'macros', 'workhorseModels', 'autoModels', 'theme',
@@ -21,6 +22,10 @@ const EXPORT_KEYS = [
   'contextHotkey', 'notifications', 'queue', 'usage',
   'wakeWord',
 ];
+
+function _isPlainObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
 
 function _pick(cfg) {
   const out = {};
@@ -34,6 +39,11 @@ function _pick(cfg) {
       phrase: out.wakeWord.phrase || 'hey copilot',
       chunkSeconds: out.wakeWord.chunkSeconds || 2,
     };
+  }
+  // Never export webhook URLs — they often embed Slack/Discord tokens.
+  if (out.notifications && typeof out.notifications === 'object') {
+    out.notifications = Object.assign({}, out.notifications);
+    delete out.notifications.webhookUrl;
   }
   return out;
 }
@@ -94,9 +104,14 @@ function applyPackage(pkg, currentCfg, opts = {}) {
       next[k] = incoming[k];
       continue;
     }
-    if (incoming[k] !== null && typeof incoming[k] === 'object' && !Array.isArray(incoming[k])
-        && next[k] !== null && typeof next[k] === 'object' && !Array.isArray(next[k])) {
-      next[k] = Object.assign({}, next[k], incoming[k]);
+    if (_isPlainObject(incoming[k]) && _isPlainObject(next[k])) {
+      const merged = Object.assign({}, next[k]);
+      for (const [ik, iv] of Object.entries(incoming[k])) {
+        // Empty remote slots must not wipe the importer's macros/models.
+        if (SLOT_KEYS.has(k) && (iv === '' || iv == null)) continue;
+        merged[ik] = iv;
+      }
+      next[k] = merged;
     } else {
       next[k] = incoming[k];
     }

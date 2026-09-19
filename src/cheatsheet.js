@@ -51,8 +51,10 @@ class CheatSheet {
     const t = theme.get(cfg);
     const rows  = process.stdout.rows    || 24;
     const cols  = process.stdout.columns || 80;
-    const w     = Math.min(74, cols - 4);
-    const inner = w - 2;
+    const title = ' copilot+ cheatsheet ';
+    const boxWidth = Math.min(74, Math.max(0, cols - 4));
+    const w     = Math.max(title.length + 2, boxWidth);
+    const inner = Math.max(title.length, w - 2);
     const startRow = 2;
     const startCol = Math.max(1, Math.floor((cols - w) / 2));
 
@@ -100,9 +102,7 @@ class CheatSheet {
     ];
 
     const lines = [];
-    const title = ' copilot+ cheatsheet ';
-    const padL = Math.floor((inner - title.length) / 2);
-    const padR = inner - title.length - padL;
+    const { padL, padR } = titlePads(inner, title.length);
     lines.push(`${TL}${H.repeat(padL)}${t.bold}${title}${t.reset}${H.repeat(padR)}${TR}`);
 
     for (let s = 0; s < sections.length; s++) {
@@ -137,6 +137,12 @@ class CheatSheet {
   }
 }
 
+function titlePads(inner, titleLen) {
+  const padL = Math.max(0, Math.floor((inner - titleLen) / 2));
+  const padR = Math.max(0, inner - titleLen - padL);
+  return { padL, padR };
+}
+
 function _vlen(s) { return s.replace(/\x1b\[[0-9;]*[mA-Za-z]/g, '').length; }
 function _pad(s, w) { return s + ' '.repeat(Math.max(0, w - _vlen(s))); }
 function _truncPad(s, w) {
@@ -154,3 +160,4 @@ function _truncPad(s, w) {
 }
 
 module.exports = CheatSheet;
+module.exports.titlePads = titlePads;

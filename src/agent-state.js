@@ -184,10 +184,7 @@ function scanNativeProcesses(knownPids) {
     if (knownPids.has(pid))      continue;  // already tracked via state file
     if (args.includes('--monitor')) continue;
 
-    // Match bare `copilot` binary — exact name or /path/to/copilot, NOT copilot+
-    const isBare = /(?:^|\/)(copilot)(?:\s|$)/.test(args) &&
-                   !args.includes('copilot+') &&
-                   !args.includes('copilot-plus');
+    const isBare = isBareCopilotProcess(args);
     // Match `gh copilot ...`
     const isGh   = /^gh\s+copilot/.test(args);
 
@@ -270,8 +267,7 @@ function scanNativeProcessesWindows(knownPids) {
     if (knownPids.has(pid))      continue;  // already tracked via state file
     if (args.includes('--monitor')) continue;
 
-    const isBare = /\bcopilot(?:\.cmd|\.exe)?\b/i.test(args) &&
-                   !/copilot\+|copilot-plus/i.test(args);
+    const isBare = isBareCopilotProcess(args);
     const isGh   = /\bgh(?:\.exe)?\b.*\bcopilot\b/i.test(args);
 
     if (!isBare && !isGh) continue;
@@ -294,4 +290,16 @@ function scanNativeProcessesWindows(knownPids) {
   return results;
 }
 
-module.exports = { writeState, readAll, clearState, scanNativeProcesses, AGENTS_DIR };
+/**
+ * True if `args` looks like the Copilot CLI (not copilot+, language-server, etc).
+ */
+function isBareCopilotProcess(args) {
+  const s = String(args || '');
+  if (/copilot\+|copilot-plus|copilot-language-server/i.test(s)) return false;
+  if (IS_WIN) {
+    return /(?:^|[\\/ ])copilot(?:\.cmd|\.exe)?(?:\s|$)/i.test(s);
+  }
+  return /(?:^|\/)copilot(?:\s|$)/.test(s);
+}
+
+module.exports = { writeState, readAll, clearState, scanNativeProcesses, isBareCopilotProcess, AGENTS_DIR };

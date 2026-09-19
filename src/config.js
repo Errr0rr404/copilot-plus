@@ -286,11 +286,11 @@ function load() {
 
   const defaults = defaultConfig();
 
-  // Auto-heal stale modelPath: if the saved path no longer exists, re-detect
-  let modelPath = fileConfig.modelPath;
-  if (modelPath && !fs.existsSync(modelPath)) {
-    modelPath = findWhisperModel();
-  }
+  // Auto-heal missing/stale modelPath. Do not pass `undefined` into
+  // Object.assign — that would wipe defaultConfig()'s auto-detected path.
+  const modelPath = (fileConfig.modelPath && fs.existsSync(fileConfig.modelPath))
+    ? fileConfig.modelPath
+    : findWhisperModel();
 
   // Deep-merge nested objects so partial config doesn't obliterate defaults
   const merged = Object.assign({}, defaults, fileConfig, { audioDevice, modelPath });

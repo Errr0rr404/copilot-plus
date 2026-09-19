@@ -21,8 +21,12 @@ const worktree = require('../src/worktree');
 const { fetchQuota } = require('../src/copilot-api');
 
 const IS_WIN = os.platform() === 'win32';
+const IS_MAC = os.platform() === 'darwin';
 const WHICH  = IS_WIN ? 'where' : 'which';
+const BIN_LOOKUP = { timeout: 5000 };
 const VERSION = require('../package.json').version;
+const MODEL_HOTKEY = IS_MAC ? 'Opt+⇧' : 'Ctrl+Shift';
+const MACRO_HOTKEY = IS_MAC ? 'Opt' : 'Ctrl';
 
 // Disable Win32 Input Mode (sends keys as CSI sequences and breaks raw input)
 if (IS_WIN && process.stdout.isTTY) process.stdout.write('\x1b[?9001l');
@@ -63,7 +67,7 @@ if (has('--preferences')) {
 }
 
 if (has('--doctor')) {
-  runDoctor();
+  runDoctor().catch(err => { console.error('Error:', err.message); process.exit(1); });
   return;
 }
 
@@ -133,8 +137,8 @@ function printHelp() {
   console.log(`${t.bold}USAGE${t.reset}`);
   console.log(`  copilot+                    launch with all enhancements`);
   console.log(`  copilot+ --monitor          live multi-session dashboard`);
-  console.log(`  copilot+ --history [query]  search past prompts`);
-  console.log(`  copilot+ --snippets         browse bookmarked responses`);
+  console.log(`  copilot+ --history [query]  search past prompts (--clear to wipe)`);
+  console.log(`  copilot+ --snippets         browse bookmarked responses (--bookmarks)`);
   console.log(`  copilot+ --usage            local + premium usage summary`);
   console.log(`  copilot+ --workflows        list prompt workflow chains`);
   console.log(`  copilot+ --worktree [name]  create isolated git worktree`);
@@ -159,9 +163,9 @@ function printHelp() {
   console.log(`  Ctrl+T             toggle text-to-speech`);
   console.log(`  Ctrl+B             bookmark last response`);
   console.log(`  Enter (busy)       queue prompt while agent is responding`);
-  console.log(`  ${IS_WIN ? 'Ctrl+Shift' : 'Opt+⇧'}+1–4    switch workhorse model 1–4`);
-  console.log(`  ${IS_WIN ? 'Ctrl+Shift' : 'Opt+⇧'}+5      toggle ⚡ Auto Mode`);
-  console.log(`  ${IS_WIN ? 'Ctrl' : 'Opt'}+1–9         run macro 1–9`);
+  console.log(`  ${MODEL_HOTKEY}+1–4    switch workhorse model 1–4`);
+  console.log(`  ${MODEL_HOTKEY}+5      toggle ⚡ Auto Mode`);
+  console.log(`  ${MACRO_HOTKEY}+1–9         run macro 1–9`);
   console.log(`  !cmd               run shell command, inject output as context\n`);
   console.log(`${t.bold}DOCS${t.reset}     https://github.com/Errr0rr404/copilot-plus`);
   console.log(`${t.bold}ISSUES${t.reset}   https://github.com/Errr0rr404/copilot-plus/issues\n`);
@@ -275,7 +279,7 @@ async function runDoctor() {
 
   const bins = ['copilot', 'ffmpeg', 'whisper-cli'];
   for (const b of bins) {
-    const ok = await new Promise(r => execFile(WHICH, [b], err => r(!err)));
+    const ok = await new Promise(r => execFile(WHICH, [b], BIN_LOOKUP, err => r(!err)));
     console.log(`  ${ok ? `${t.success}✓${t.reset}` : `${t.error}✗${t.reset}`}  ${b}`);
   }
   const model = cfg.findWhisperModel();
@@ -501,7 +505,7 @@ async function runSetup() {
 
 function checkBinary(name, messages) {
   return new Promise(resolve => {
-    execFile(WHICH, [name], err => {
+    execFile(WHICH, [name], BIN_LOOKUP, err => {
       if (err) {
         for (const line of messages.missing) console.log(line);
         console.log('');
@@ -531,8 +535,8 @@ function printHotkeysAndExit(allGood) {
     ['Ctrl+T',             'toggle text-to-speech'],
     ['Ctrl+B',             'bookmark last response'],
     ['Ctrl+K',             'command palette'],
-    [`${IS_WIN ? 'Ctrl+Shift' : 'Opt+⇧'}+1–5`, 'switch model / toggle auto'],
-    [`${IS_WIN ? 'Ctrl' : 'Opt'}+1–9`,         'macros'],
+    [`${MODEL_HOTKEY}+1–5`, 'switch model / toggle auto'],
+    [`${MACRO_HOTKEY}+1–9`,         'macros'],
     ['!cmd <Enter>',       'inject shell output'],
   ];
   for (const [k, d] of lines) console.log(`  ${k.padEnd(18)}${t.dim}${d}${t.reset}`);

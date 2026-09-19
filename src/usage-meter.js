@@ -9,7 +9,17 @@
 const history = require('./history');
 
 function _dayKey(d = new Date()) {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function _dayKeyFromTs(ts) {
+  if (!ts) return 'unknown';
+  const d = ts instanceof Date ? ts : new Date(ts);
+  if (Number.isNaN(d.getTime())) return String(ts).slice(0, 10) || 'unknown';
+  return _dayKey(d);
 }
 
 /**
@@ -30,7 +40,7 @@ function localStats(opts = {}) {
     const ts = r.ts ? Date.parse(r.ts) : 0;
     if (ts && ts < cutoff) continue;
     total++;
-    const day = r.ts ? r.ts.slice(0, 10) : 'unknown';
+    const day = _dayKeyFromTs(r.ts);
     byDay[day] = (byDay[day] || 0) + 1;
     if (day === today) todayCount++;
     const model = r.model || 'unknown';
@@ -72,7 +82,7 @@ function summary(quota, opts = {}) {
       used,
       entitlement: ent,
       pctUsed,
-      planName: quota.planName || null,
+      planName: quota.planName || quota.plan || null,
       resetDate: quota.resetDate || null,
       unlimited: !!quota.premium.unlimited,
     };
@@ -121,6 +131,7 @@ function formatCli(sum) {
       lines.push(`  plan: ${sum.premium.planName || '?'} · unlimited`);
     } else if (sum.premium.entitlement > 0 && sum.premium.pctUsed != null) {
       lines.push(`  ${sum.premium.used}/${sum.premium.entitlement} used (${sum.premium.pctUsed}%)`);
+      if (sum.premium.planName) lines.push(`  plan: ${sum.premium.planName}`);
       if (sum.premium.resetDate) lines.push(`  resets: ${sum.premium.resetDate}`);
     } else {
       lines.push(`  used: ${sum.premium.used}${sum.premium.resetDate ? ` · resets ${sum.premium.resetDate}` : ''}`);
